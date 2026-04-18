@@ -1,0 +1,29 @@
+{
+  "description": "exomemory2 — Auto-capture conversation transcripts to the vault on PreCompact and SessionEnd",
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/capture.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/capture.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
