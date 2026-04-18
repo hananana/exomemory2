@@ -1,55 +1,57 @@
 # exomemory2
 
-A Claude Code plugin that implements [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) as an external memory for Claude.
+[English](./README.en.md)
 
-Drop source documents into `raw/`, run `/wiki-ingest`, and Claude compiles them into a persistent, interlinked markdown wiki. Query the accumulated knowledge with `/wiki-query`. Conversations captured automatically on `/compact` and session exit.
+[Andrej Karpathy の LLM Wiki パターン](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)を Claude Code プラグインとして実装した、Claude 向け外部記憶システム。
 
-## Status
+ソース文書を `raw/` に投入して `/wiki-ingest` を実行すると、Claude が永続的で相互リンクされた Markdown wiki にコンパイルする。蓄積された知識は `/wiki-query` で問い合わせ可能。`/compact` やセッション終了時に会話は自動でキャプチャされる。
 
-Early MVP (v0.1). Core ingest, query, and auto-capture work. Obsidian integration, graph visualization, lint, and multi-vault routing are planned for later.
+## ステータス
 
-Supersedes [hananana/exomemory](https://github.com/hananana/exomemory) (v1), which used cognitive-science-inspired memory tiers. v2 is a ground-up redesign around Karpathy's wiki pattern.
+初期 MVP (v0.1)。コアの ingest / query / 自動capture は動作する。Obsidian 深統合、グラフ可視化、lint、複数 vault ルーティングは今後実装予定。
 
-## Install
+認知科学ベースの tiered memory を採用していた [hananana/exomemory](https://github.com/hananana/exomemory) (v1) の後継。v2 は Karpathy の wiki パターンを軸にゼロから再設計した。
 
-From within Claude Code:
+## インストール
+
+Claude Code 内で以下を実行：
 
 ```
 /plugin marketplace add hananana/exomemory2
 /plugin install exomemory2@exomemory2
 ```
 
-The hook script requires `jq` (usually pre-installed, otherwise `brew install jq`).
+hook スクリプトには `jq` が必要（通常は導入済み、無ければ `brew install jq`）。
 
-## Quick start
+## クイックスタート
 
-### 1. Create a vault
+### 1. Vault を作成
 
 ```
 /wiki-init ~/vault-personal
 ```
 
-This creates a vault skeleton at `~/vault-personal/` containing `WIKI.md`, `raw/`, and `wiki/`.
+指定パスに `WIKI.md`、`raw/`、`wiki/` を含む vault スケルトンが生成される。
 
-### 2. Set the active vault
+### 2. アクティブ vault を指定
 
-Either export an environment variable (persistent):
+環境変数で恒久設定（推奨）：
 
 ```bash
 export CLAUDE_MEMORY_VAULT=~/vault-personal
 ```
 
-Or pass `--vault <path>` to each command, or `cd` into the vault (ancestor search).
+あるいは各コマンドに `--vault <path>` を渡す、または vault 配下に `cd`（ancestor search が効く）。
 
-### 3. Ingest sources
+### 3. ソースを ingest
 
-Drop markdown into `raw/`, then:
+`raw/` に Markdown を置いてから：
 
 ```
 /wiki-ingest raw/papers/attention.md
 ```
 
-Or ingest a directory:
+ディレクトリ単位の ingest も可：
 
 ```
 /wiki-ingest raw/papers/
@@ -58,65 +60,65 @@ Or ingest a directory:
 ### 4. Query
 
 ```
-/wiki-query "What does the wiki say about attention mechanisms?"
+/wiki-query "attention mechanisms について wiki は何を記述しているか？"
 ```
 
-### 5. Auto-capture
+### 5. 自動 capture
 
-Once `CLAUDE_MEMORY_VAULT` is set, the plugin's hooks write a markdown handover file to `raw/handovers/<session-id>.md` on every `/compact` and session exit. Ingest those later with `/wiki-ingest raw/handovers/` to fold conversations into the wiki.
+`CLAUDE_MEMORY_VAULT` が設定されていれば、プラグインの hook が `/compact` とセッション終了のタイミングで `raw/handovers/<session-id>.md` に Markdown ハンドオーバーファイルを書き出す。後で `/wiki-ingest raw/handovers/` を実行して会話ログを wiki に取り込める。
 
-## Commands
+## コマンド一覧
 
-| Command | Purpose |
+| コマンド | 用途 |
 |---|---|
-| `/wiki-init <vault-path>` | Scaffold a new vault |
-| `/wiki-ingest <file-or-dir> [--vault <path>]` | Compile raw sources into wiki pages |
-| `/wiki-query <question> [--vault <path>] [--save]` | Synthesize an answer from the wiki |
+| `/wiki-init <vault-path>` | 新規 vault のスケルトン作成 |
+| `/wiki-ingest <file-or-dir> [--vault <path>]` | raw ソースを wiki ページへコンパイル |
+| `/wiki-query <question> [--vault <path>] [--save]` | wiki から合成回答を生成 |
 
-## Vault layout
+## Vault 構造
 
 ```
 <vault>/
-├── WIKI.md                 # Schema and workflow (authoritative for Claude)
-├── raw/                    # Immutable source documents (user drops files here)
-│   └── handovers/          # Auto-captured conversations
-└── wiki/                   # LLM-maintained knowledge layer
+├── WIKI.md                 # スキーマとワークフロー（Claude が参照する正本）
+├── raw/                    # イミュータブルなソース文書（ユーザーがここに投入）
+│   └── handovers/          # 自動キャプチャされた会話ログ
+└── wiki/                   # LLM が保守する知識レイヤー
     ├── index.md
     ├── log.md
     ├── overview.md
-    ├── sources/            # One page per raw source
-    ├── entities/           # People, organizations, projects, products
-    └── concepts/           # Ideas, frameworks, methods, theories
+    ├── sources/            # raw ソース1つに対し1ページ
+    ├── entities/           # 人物、組織、プロジェクト、製品
+    └── concepts/           # 概念、フレームワーク、手法、理論
 ```
 
-Every page is plain Markdown with YAML frontmatter and `[[wikilink]]` cross-references. Works with Obsidian, VS Code, or any Markdown viewer.
+各ページは YAML frontmatter 付きのプレーン Markdown で、`[[wikilink]]` による相互参照を持つ。Obsidian、VS Code、その他任意の Markdown ビューワで閲覧可能。
 
-## Design notes
+## 設計方針
 
-- **Claude Code only** — commands and hooks are Claude-Code-native. No Python tooling to maintain.
-- **File over app** — the wiki is just Markdown files; no lock-in.
-- **Compounds over time** — entity and concept pages are MERGEd across sources, never overwritten.
-- **Local by default** — no cloud, no account. Your vault is yours.
+- **Claude Code 専用** — コマンドとフックは Claude Code ネイティブで構成。Python 等の外部ツール不要。
+- **File over app** — wiki の実体は Markdown ファイルのみ。特定アプリへのロックインなし。
+- **Compounds over time** — entity / concept ページは新規ソース取り込み時に **上書きせず MERGE** する。情報が累積して濃くなる。
+- **Local by default** — クラウド接続・アカウント不要。vault はあなたの手元にある。
 
-## Roadmap
+## ロードマップ
 
-- v0.2: Auto-ingest on `SessionStart` (opt-in via env flag)
-- v0.3: Privacy filter at capture time (block sensitive topics)
-- v0.4: Graph-aware lint (orphans, broken links, contradictions)
-- Later: Obsidian Bases/Canvas templates, HTML publishing via Quartz
+- v0.2: `SessionStart` での自動 ingest（環境変数で opt-in）
+- v0.3: capture 時のプライバシーフィルタ（機密トピック除外）
+- v0.4: graph-aware lint（孤立ページ、リンク切れ、矛盾検出）
+- 将来: Obsidian Bases / Canvas テンプレート、Quartz 経由の HTML 公開
 
-## Migrating from exomemory v1
+## exomemory v1 からの移行
 
-The v1 plugin (`hananana/exomemory`) will be deprecated and archived once v2 stabilizes. To switch:
+v1 プラグイン（`hananana/exomemory`）は v2 安定後に deprecate し archive される。移行手順：
 
-1. In your Claude Code `settings.json`, replace `exomemory` references with `exomemory2`:
+1. Claude Code の `settings.json` から `exomemory` の参照を `exomemory2` に差し替える：
    - `extraKnownMarketplaces`
    - `enabledPlugins`
-2. Run `/wiki-init <path>` to create a fresh vault
-3. Optionally migrate useful content from v1 memory files into `raw/` and re-ingest
+2. `/wiki-init <path>` で新しい vault を作成
+3. 必要に応じて v1 の memory ファイルから有用な内容を `raw/` に移し、再 ingest
 
-v1's tiered memory (episodic/semantic/procedural) does not map 1:1 onto v2's sources/entities/concepts. Start fresh is the recommended path.
+v1 の tier 式メモリ（episodic / semantic / procedural）は v2 の sources / entities / concepts に一対一で写像できない。まっさらから始めるのが推奨経路。
 
-## License
+## ライセンス
 
 MIT.
