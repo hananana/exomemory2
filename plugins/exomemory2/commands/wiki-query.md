@@ -1,67 +1,86 @@
 ---
 description: Query the wiki and synthesize an answer with wikilink citations
 argument-hint: <question> [--vault <path>] [--save]
-allowed-tools: Bash(test:*), Bash(ls:*), Bash(pwd:*), Bash(echo:*), Bash(date:*), Read, Write, Edit, Glob, Grep
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
 # /wiki-query
 
-Answer a question by reading the active vault's wiki and synthesizing across pages.
+Answer a question using the active vault's wiki, synthesizing across pages.
 
-Arguments received: `$ARGUMENTS`
+## Arguments
+
+```
+$ARGUMENTS
+```
 
 ## Step 1: Parse arguments
 
-From `$ARGUMENTS`:
-- Extract any `--vault <path>` flag
-- Extract any `--save` flag (no value, just presence)
-- The remainder (concatenated) is the question
+If `$ARGUMENTS` is empty, stop and reply:
 
-If the question is empty, report usage and stop:
 ```
 Usage: /wiki-query <question> [--vault <path>] [--save]
 ```
 
+Otherwise, extract:
+- `--vault <path>` flag, if present
+- `--save` flag (boolean, present or absent)
+- The remaining text (concatenated) is the **question**
+
+If no question remains after removing flags, stop with the usage message.
+
 ## Step 2: Resolve the vault
 
-Same resolution as `/wiki-ingest`:
+Try in order:
 
-1. `--vault` if provided
-2. `CLAUDE_MEMORY_VAULT` env var: !`echo "${CLAUDE_MEMORY_VAULT:-}"`
-3. Ancestor search from cwd: !`pwd`, then walk up looking for `WIKI.md`
+1. `--vault <path>` from step 1 → verify `WIKI.md` exists there:
+   ```bash
+   test -f "<explicit-vault>/WIKI.md" && echo "OK" || echo "MISSING"
+   ```
+2. `CLAUDE_MEMORY_VAULT` env var:
+   ```bash
+   echo "${CLAUDE_MEMORY_VAULT:-}"
+   ```
+3. Ancestor search from cwd:
+   ```bash
+   pwd
+   d="$(pwd)"
+   while [ "$d" != "/" ]; do
+     if [ -f "$d/WIKI.md" ]; then echo "FOUND: $d"; break; fi
+     d="$(dirname "$d")"
+   done
+   ```
 
-If none found, stop with:
+If none found, stop:
+
 ```
 Vault not found.
 Set CLAUDE_MEMORY_VAULT, pass --vault, or cd into a vault.
 ```
 
-Record as `$VAULT`.
+Call the resolved absolute vault path `VAULT`.
 
 ## Step 3: Load the schema
 
-Read `<VAULT>/WIKI.md` to understand page formats and wikilink conventions.
+Read `<VAULT>/WIKI.md` for page formats and wikilink conventions.
 
 ## Step 4: Identify relevant pages
 
 1. Read `<VAULT>/wiki/index.md` to see what pages exist
-2. Identify candidate pages relevant to the question:
-   - Title match
-   - Keyword overlap
-   - Thematic relation
-3. Optionally grep for specific terms across `<VAULT>/wiki/` if needed
+2. Select candidates by title match, keyword overlap, and thematic relation
+3. Optionally grep across `<VAULT>/wiki/` for specific terms
 
 ## Step 5: Read candidates
 
-For each candidate page, read its full content. Track which pages contributed which facts.
+Read each candidate page fully. Track which page supports which claim.
 
 ## Step 6: Synthesize
 
-Compose an answer:
+Compose the answer:
 
-- Use `[[slug]]` wikilink citations inline for every significant claim, pointing to the page that supports it
-- If pages contradict each other, surface the disagreement explicitly rather than picking one silently
-- If the wiki does not adequately cover the question, say so plainly — do **not** fabricate or fill gaps from general knowledge. Suggest what to ingest next.
+- Inline `[[slug]]` wikilink citations for every significant claim
+- If pages contradict, surface the disagreement explicitly
+- If the wiki does not cover the question, say so plainly. Do **not** fabricate or fill in from general knowledge. Suggest what to ingest next.
 
 ## Step 7: Output (and optional save)
 
@@ -69,24 +88,30 @@ Return the answer to the user.
 
 If `--save` was specified:
 
-1. Generate a `slug` from the question: kebab-case, lowercase, strip punctuation, max ~60 chars
-2. Ensure `<VAULT>/wiki/syntheses/` exists (create if not)
-3. Write `<VAULT>/wiki/syntheses/<slug>.md` with:
+1. Generate a `slug` from the question (kebab-case, lowercase, strip punctuation, max ~60 chars)
+2. Ensure `<VAULT>/wiki/syntheses/` exists:
+   ```bash
+   mkdir -p "<VAULT>/wiki/syntheses"
+   ```
+3. Write `<VAULT>/wiki/syntheses/<slug>.md`:
    ```yaml
    ---
    title: <the question>
    type: synthesis
    tags: [query]
-   last_updated: YYYY-MM-DD
+   last_updated: <today>
    ---
    ```
    followed by the answer (preserving `[[wikilink]]` citations)
-4. Append to `<VAULT>/wiki/index.md` under the appropriate section (add a `## Syntheses` section if missing)
-5. Append to `<VAULT>/wiki/log.md`: `## [YYYY-MM-DD] CREATE | syntheses/<slug>`
-6. Today's date: !`date +%Y-%m-%d`
+4. Append to `<VAULT>/wiki/index.md` under a `## Syntheses` section (add if missing)
+5. Append to `<VAULT>/wiki/log.md`: `## [<today>] CREATE | syntheses/<slug>`
+6. Today's date:
+   ```bash
+   date +%Y-%m-%d
+   ```
 
 ## Notes
 
-- The wiki is the single source of truth for answering. Do not rely on your training knowledge unless explicitly asked to compare.
+- The wiki is the sole source of truth for the answer. Use training knowledge only when explicitly asked to compare.
 - Prefer concise, well-cited answers over long expository ones.
-- If the question is ambiguous, ask a clarifying question instead of guessing.
+- If the question is ambiguous, ask one clarifying question instead of guessing.
