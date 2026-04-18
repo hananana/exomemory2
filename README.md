@@ -10,8 +10,6 @@
 
 初期 MVP (v0.1)。コアの ingest / query / 自動capture は動作する。Obsidian 深統合、グラフ可視化、lint、複数 vault ルーティングは今後実装予定。
 
-認知科学ベースの tiered memory を採用していた [hananana/exomemory](https://github.com/hananana/exomemory) (v1) の後継。v2 は Karpathy の wiki パターンを軸にゼロから再設計した。
-
 ## データフロー
 
 ```
@@ -271,18 +269,6 @@ rm -rf ~/.claude/plugins/cache/exomemory2/
 - v0.3: capture 時のプライバシーフィルタ（機密トピック除外）
 - v0.4: graph-aware lint（孤立ページ、リンク切れ、矛盾検出）
 - 将来: Obsidian Bases / Canvas テンプレート、Quartz 経由の HTML 公開
-
-## exomemory v1 からの移行
-
-v1 プラグイン（`hananana/exomemory`）は v2 安定後に deprecate し archive される。移行手順：
-
-1. Claude Code の `settings.json` から `exomemory` の参照を `exomemory2` に差し替える：
-   - `extraKnownMarketplaces`
-   - `enabledPlugins`
-2. `/wiki-init <path>` で新しい vault を作成
-3. 必要に応じて v1 の memory ファイルから有用な内容を `raw/` に移し、再 ingest
-
-v1 の tier 式メモリ（episodic / semantic / procedural）は v2 の sources / entities / concepts に一対一で写像できない。まっさらから始めるのが推奨経路。
 
 ## ライセンス
 
