@@ -1,6 +1,21 @@
-# exomemory2
+<h1 align="center">exomemory2</h1>
 
-[English](./README.en.md)
+<p align="center">
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/hananana/exomemory2?color=blue"></a>
+    <a href="https://github.com/hananana/exomemory2/releases"><img alt="Version" src="https://img.shields.io/github/v/tag/hananana/exomemory2"></a>
+    <a href="https://docs.claude.com/en/docs/claude-code"><img alt="Claude Code Plugin" src="https://img.shields.io/badge/Claude_Code-Plugin-D97757"></a>
+</p>
+
+<h4 align="center">
+    <p>
+        <b>日本語</b> |
+        <a href="./README.en.md">English</a>
+    </p>
+</h4>
+
+<h3 align="center">
+    <p>Claude Code 向け外部記憶 wiki — Karpathy の LLM Wiki パターンをプラグイン化</p>
+</h3>
 
 [Andrej Karpathy の LLM Wiki パターン](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)を Claude Code プラグインとして実装した、Claude 向け外部記憶システム。
 
@@ -136,15 +151,16 @@ export CLAUDE_MEMORY_VAULT=~/vault-personal
 
 ### 3. ソースを ingest
 
-`raw/` に Markdown を置いてから：
+`raw/` に Markdown を置いたら、引数なしで `raw/` 全体をスキャン：
+
+```
+/wiki-ingest
+```
+
+これで新規/変更されたファイルだけが取り込まれる（未変更ファイルは `source_hash` 一致で `SKIP`）。特定のファイルやディレクトリだけ狙い撃ちしたい場合は引数を渡す：
 
 ```
 /wiki-ingest raw/papers/attention.md
-```
-
-ディレクトリ単位の ingest も可：
-
-```
 /wiki-ingest raw/papers/
 ```
 
@@ -156,11 +172,13 @@ export CLAUDE_MEMORY_VAULT=~/vault-personal
 
 ### 5. 会話ログを wiki に取り込む
 
-セッションを重ねると `raw/handovers/` に `.md` が蓄積する（下記「自動 capture」セクション参照）。定期的に以下を実行：
+セッションを重ねると `raw/handovers/` に `.md` が蓄積する（下記「自動 capture」セクション参照）。引数なしの `/wiki-ingest` で一緒に取り込まれる：
 
 ```
-/wiki-ingest raw/handovers/
+/wiki-ingest
 ```
+
+handover だけを対象にしたい場合は従来通り `/wiki-ingest raw/handovers/`。
 
 ## 自動 capture
 
@@ -244,14 +262,14 @@ last_captured_at: "2026-04-19T04:12:34Z"
 - ingest 失敗が可視化されないリスクを避ける
 - プライバシーの都合で「wiki 化前に raw をレビューしたい」ケースに対応
 
-実用上は週次などで `/wiki-ingest raw/handovers/` を走らせて一括取り込みするのが現実的。v0.2 で `SessionStart` ベースの自動 ingest（opt-in）を追加予定。
+実用上は週次などで `/wiki-ingest`（引数なし）を走らせて一括取り込みするのが現実的。v0.2 で `SessionStart` ベースの自動 ingest（opt-in）を追加予定。
 
 ## コマンド一覧
 
 | コマンド | 用途 |
 |---|---|
 | `/wiki-init <vault-path>` | 新規 vault のスケルトン作成 |
-| `/wiki-ingest <file-or-dir> [--vault <path>]` | raw ソースを wiki ページへコンパイル |
+| `/wiki-ingest [<file-or-dir>] [--vault <path>]` | raw ソースを wiki ページへコンパイル（引数省略で `raw/` 全体をスキャン） |
 | `/wiki-query <question> [--vault <path>] [--save]` | wiki から合成回答を生成 |
 
 ## Vault 構造

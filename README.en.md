@@ -1,6 +1,21 @@
-# exomemory2
+<h1 align="center">exomemory2</h1>
 
-[日本語](./README.md)
+<p align="center">
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/hananana/exomemory2?color=blue"></a>
+    <a href="https://github.com/hananana/exomemory2/releases"><img alt="Version" src="https://img.shields.io/github/v/tag/hananana/exomemory2"></a>
+    <a href="https://docs.claude.com/en/docs/claude-code"><img alt="Claude Code Plugin" src="https://img.shields.io/badge/Claude_Code-Plugin-D97757"></a>
+</p>
+
+<h4 align="center">
+    <p>
+        <a href="./README.md">日本語</a> |
+        <b>English</b>
+    </p>
+</h4>
+
+<h3 align="center">
+    <p>External memory wiki for Claude Code — a plugin implementation of Karpathy's LLM Wiki pattern</p>
+</h3>
 
 A Claude Code plugin that implements [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) as an external memory for Claude.
 
@@ -105,15 +120,16 @@ Or pass `--vault <path>` to each command, or `cd` into the vault (ancestor searc
 
 ### 3. Ingest sources
 
-Drop markdown into `raw/`, then:
+Drop markdown into `raw/`, then run with no arguments to scan the whole `raw/` tree:
+
+```
+/wiki-ingest
+```
+
+Unchanged files are skipped via `source_hash` match, so rerunning is cheap. Point at a specific file or directory when you want to narrow the scope:
 
 ```
 /wiki-ingest raw/papers/attention.md
-```
-
-Or ingest a directory:
-
-```
 /wiki-ingest raw/papers/
 ```
 
@@ -125,14 +141,14 @@ Or ingest a directory:
 
 ### 5. Auto-capture
 
-Once `CLAUDE_MEMORY_VAULT` is set, the plugin's hooks write a markdown handover file to `raw/handovers/<session-id>.md` on every `/compact` and session exit. Ingest those later with `/wiki-ingest raw/handovers/` to fold conversations into the wiki.
+Once `CLAUDE_MEMORY_VAULT` is set, the plugin's hooks write a markdown handover file to `raw/handovers/<session-id>.md` on every `/compact` and session exit. The no-argument `/wiki-ingest` picks them up on the next run. Point explicitly at `/wiki-ingest raw/handovers/` if you want handovers only.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `/wiki-init <vault-path>` | Scaffold a new vault |
-| `/wiki-ingest <file-or-dir> [--vault <path>]` | Compile raw sources into wiki pages |
+| `/wiki-ingest [<file-or-dir>] [--vault <path>]` | Compile raw sources into wiki pages (no argument = scan whole `raw/`) |
 | `/wiki-query <question> [--vault <path>] [--save]` | Synthesize an answer from the wiki |
 
 ## Vault layout
