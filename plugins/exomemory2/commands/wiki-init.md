@@ -74,7 +74,29 @@ ls -la "<VAULT_ABS>/raw"
 test -f "<VAULT_ABS>/WIKI.md" && echo "WIKI.md: OK" || echo "WIKI.md: MISSING"
 ```
 
-Confirm the tree contains `WIKI.md`, `raw/` (with `handovers/`), and `wiki/` (with `index.md`, `log.md`, `overview.md`, `sources/`, `entities/`, `concepts/`).
+Confirm the tree contains `WIKI.md`, `raw/` (with `handovers/`), `wiki/` (with `index.md`, `log.md`, `overview.md`, `sources/`, `entities/`, `concepts/`), and `.obsidian/` (with `app.json`, `appearance.json`, `core-plugins.json`, `graph.json`).
+
+## Step 4.5: Detect Obsidian
+
+The vault template ships with an `.obsidian/` preset (graph color groups for sources/entities/concepts, recommended core plugins). Obsidian is not required — the wiki is plain Markdown — but it is the recommended frontend for Karpathy's original UX (Graph View, Backlinks, Web Clipper, Dataview).
+
+Run the following to check whether Obsidian is available:
+
+```bash
+OBSIDIAN_FOUND=0
+if [ "$(uname)" = "Darwin" ]; then
+  if [ -d "/Applications/Obsidian.app" ] || [ -d "$HOME/Applications/Obsidian.app" ]; then
+    OBSIDIAN_FOUND=1
+  fi
+else
+  if command -v obsidian >/dev/null 2>&1; then
+    OBSIDIAN_FOUND=1
+  fi
+fi
+echo "OBSIDIAN_FOUND=$OBSIDIAN_FOUND"
+```
+
+Capture the result as `OBSIDIAN_FOUND` (`0` or `1`). Use it to tailor Step 5.
 
 ## Step 5: Report
 
@@ -90,7 +112,32 @@ Next steps:
   2. Drop source documents into: <VAULT_ABS>/raw/
   3. Ingest them: /wiki-ingest <file>
   4. Query the wiki: /wiki-query "your question"
+```
 
+Then append **one of the following** depending on `OBSIDIAN_FOUND`:
+
+**If `OBSIDIAN_FOUND=1`:**
+
+```
+  5. (Recommended) Open the vault in Obsidian to get Graph View, Backlinks, etc.:
+       File → Open folder as vault → <VAULT_ABS>
+     The bundled .obsidian/ preset enables core plugins and color-codes
+     sources / entities / concepts in the graph.
+```
+
+**If `OBSIDIAN_FOUND=0`:**
+
+```
+  5. (Recommended) Install Obsidian to use the bundled .obsidian/ preset:
+       macOS:   brew install --cask obsidian
+       Other:   https://obsidian.md/download
+     After installing, open the vault: File → Open folder as vault → <VAULT_ABS>
+     Without Obsidian, the wiki still works as plain Markdown in any editor.
+```
+
+Finally, always append:
+
+```
 Automatic capture of Claude conversations kicks in once
 $CLAUDE_MEMORY_VAULT is set. PreCompact and SessionEnd hooks write
 handover files to <VAULT_ABS>/raw/handovers/<session-id>.md.

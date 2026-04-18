@@ -8,7 +8,7 @@ Drop source documents into `raw/`, run `/wiki-ingest`, and Claude compiles them 
 
 ## Status
 
-Early MVP (v0.1). Core ingest, query, and auto-capture work. Obsidian integration, graph visualization, lint, and multi-vault routing are planned for later.
+Early MVP (v0.1). Core ingest, query, and auto-capture work. Obsidian is the recommended frontend, and the vault template ships with a preset (graph color coding, recommended core plugins enabled). Graph-aware lint, Bases/Canvas templates, and multi-vault routing are planned for later.
 
 Supersedes [hananana/exomemory](https://github.com/hananana/exomemory) (v1), which used cognitive-science-inspired memory tiers. v2 is a ground-up redesign around Karpathy's wiki pattern.
 
@@ -23,6 +23,66 @@ From within Claude Code:
 
 The hook script requires `jq` (usually pre-installed, otherwise `brew install jq`).
 
+## Obsidian (recommended frontend)
+
+The vault is plain Markdown, so it works in any editor. But to get the UX [Karpathy's original pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) assumes (Graph View, Backlinks, Web Clipper, Dataview), **Obsidian is the shortest path**.
+
+### Install
+
+- macOS: `brew install --cask obsidian`
+- Linux / Windows: https://obsidian.md/download
+
+### Open the vault
+
+Launch Obsidian → "Open folder as vault" → pick the path you created with `/wiki-init`.
+
+### What the bundled preset enables
+
+Every vault created by `/wiki-init` includes an `.obsidian/` directory preconfigured with:
+
+- **Core plugins enabled**: Graph view, Backlinks, Outgoing links, Tag pane, Properties, Page preview, etc.
+- **Graph View color groups**:
+  - `wiki/sources/` → blue
+  - `wiki/entities/` → green
+  - `wiki/concepts/` → orange
+
+### Recommended community plugins (install separately in Obsidian)
+
+- **Dataview** — SQL-like queries over YAML frontmatter (e.g. list all `type: entity` pages)
+- **Obsidian Web Clipper** — browser extension; configure it to save web articles under `<vault>/raw/web/`, then run `/wiki-ingest raw/web/` to fold them into the wiki
+
+### Applying the `.obsidian/` preset to an existing vault
+
+For vaults created before this preset existed:
+
+**Case A: vault has no `.obsidian/` yet**
+
+```bash
+SRC=$(ls -d ~/.claude/plugins/cache/exomemory2/exomemory2/*/template/.obsidian | sort | tail -1)
+cp -R "$SRC" <your-vault>/.obsidian
+```
+
+**Case B: vault already has `.obsidian/`**
+
+Do not overwrite — back up and merge manually:
+
+```bash
+# 1. Back up
+cp -R <your-vault>/.obsidian <your-vault>/.obsidian.bak
+
+# 2. See the diff
+SRC=$(ls -d ~/.claude/plugins/cache/exomemory2/exomemory2/*/template/.obsidian | sort | tail -1)
+diff -r "$SRC" <your-vault>/.obsidian
+```
+
+Then apply selectively:
+
+- `graph.json`: merge the three `colorGroups` entries from template into your existing array (do not replace the whole file)
+- `core-plugins.json`: add plugin names you don't have yet (never overwrite)
+- `app.json` / `appearance.json`: template ships empty; keep your existing files
+
+Remove the backup once you're satisfied: `rm -rf <your-vault>/.obsidian.bak`
+
 ## Quick start
 
 ### 1. Create a vault
@@ -31,7 +91,7 @@ The hook script requires `jq` (usually pre-installed, otherwise `brew install jq
 /wiki-init ~/vault-personal
 ```
 
-This creates a vault skeleton at `~/vault-personal/` containing `WIKI.md`, `raw/`, and `wiki/`.
+This creates a vault skeleton at `~/vault-personal/` containing `WIKI.md`, `raw/`, `wiki/`, and `.obsidian/` (recommended preset). If Obsidian is not installed, `/wiki-init` prints install instructions at the end. Opening the vault in Obsidian afterwards is recommended.
 
 ### 2. Set the active vault
 
@@ -80,6 +140,7 @@ Once `CLAUDE_MEMORY_VAULT` is set, the plugin's hooks write a markdown handover 
 ```
 <vault>/
 ├── WIKI.md                 # Schema and workflow (authoritative for Claude)
+├── .obsidian/              # Obsidian preset (graph color groups, core plugins enabled)
 ├── raw/                    # Immutable source documents (user drops files here)
 │   └── handovers/          # Auto-captured conversations
 └── wiki/                   # LLM-maintained knowledge layer
@@ -91,12 +152,12 @@ Once `CLAUDE_MEMORY_VAULT` is set, the plugin's hooks write a markdown handover 
     └── concepts/           # Ideas, frameworks, methods, theories
 ```
 
-Every page is plain Markdown with YAML frontmatter and `[[wikilink]]` cross-references. Works with Obsidian, VS Code, or any Markdown viewer.
+Every page is plain Markdown with YAML frontmatter and `[[wikilink]]` cross-references. Works with Obsidian, VS Code, or any Markdown viewer. If you don't use Obsidian, `.obsidian/` is harmless — ignore or delete it.
 
 ## Design notes
 
 - **Claude Code only** — commands and hooks are Claude-Code-native. No Python tooling to maintain.
-- **File over app** — the wiki is just Markdown files; no lock-in.
+- **File over app** — the wiki is just Markdown files; no lock-in. Obsidian is the recommended frontend, but the data is plain Markdown, so VS Code or any other viewer works too.
 - **Compounds over time** — entity and concept pages are MERGEd across sources, never overwritten.
 - **Local by default** — no cloud, no account. Your vault is yours.
 
