@@ -1,12 +1,14 @@
 ---
 description: Ingest raw sources into the wiki (CREATE/UPDATE/SKIP with dedup)
-argument-hint: <raw-file-or-dir> [--vault <path>]
+argument-hint: "[<raw-file-or-dir>] [--vault <path>]"
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
 # /wiki-ingest
 
-Ingest a raw source (file or directory) into the active vault's wiki, following the vault's `WIKI.md` workflow.
+Ingest raw sources (file or directory) into the active vault's wiki, following the vault's `WIKI.md` workflow.
+
+With no arguments, the entire `raw/` tree under the active vault is scanned and ingested. The dedup logic in `WIKI.md` (`source_hash` match → `SKIP`) ensures unchanged files are not re-processed, so rerunning is cheap for already-ingested sources.
 
 ## Arguments
 
@@ -16,13 +18,9 @@ $ARGUMENTS
 
 ## Step 1: Parse arguments
 
-If `$ARGUMENTS` is empty, stop and reply:
+Tokenize `$ARGUMENTS` by whitespace. If `--vault <path>` appears anywhere, capture that path as the explicit vault override.
 
-```
-Usage: /wiki-ingest <raw-file-or-dir> [--vault <path>]
-```
-
-Otherwise, tokenize `$ARGUMENTS` by whitespace. The first positional token is the raw file or directory path. If `--vault <path>` appears anywhere, capture that path as the explicit vault override.
+The first non-`--vault` positional token (if any) is the raw file or directory path. If no positional token is present (i.e. `$ARGUMENTS` is empty or contains only `--vault <path>`), treat the raw target as **the entire `<VAULT>/raw/` tree** — record this as `RAW_TARGET=<unset>` and resolve it after Step 2.
 
 ## Step 2: Resolve the vault
 
@@ -63,12 +61,16 @@ Read `<VAULT>/WIKI.md`. **The WIKI.md is authoritative** — if it disagrees wit
 
 ## Step 4: Validate and enumerate raw inputs
 
-The raw argument can be absolute or relative to `<VAULT>/raw/`.
+If no positional raw target was supplied (`RAW_TARGET=<unset>` from Step 1), use `<VAULT>/raw/` as the target directory.
+
+Otherwise, the raw argument can be absolute or relative to `<VAULT>/raw/`.
 
 - If **absolute**: verify it exists. Check it is inside `<VAULT>/raw/` (prefix match on absolute paths). If outside, stop with error.
 - If **relative**: interpret as `<VAULT>/raw/<arg>`. Verify the resolved absolute path exists.
 
 If the target is a directory, recurse and collect every regular file inside.
+
+When scanning `<VAULT>/raw/` with no filter (the no-argument case), it is normal for the set to include `raw/handovers/*.md` plus anything the user has manually dropped (e.g. `raw/papers/`, `raw/web/`). Unchanged files are detected in Step 5b and get `SKIP`, so scanning the whole tree is cheap even when most files are already ingested.
 
 ## Step 5: For each raw file, follow WIKI.md's ingest workflow
 
