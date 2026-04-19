@@ -159,21 +159,31 @@ count_dirty_handovers() {
   echo "$count"
 }
 
-# Subshell-aware PID. Bash 4+ has $BASHPID; Bash 3 (macOS default) does not.
-get_my_pid() {
+# Capture the current subshell's PID into MY_PID (set as a side effect).
+# Must NOT be invoked via $(...), because that would return the command
+# substitution subshell's PID — which dies the moment $() completes,
+# making any lockfile containing it look "stale" to the next caller.
+# Bash 4+ exposes $BASHPID directly; bash 3 (macOS /bin/bash) needs a
+# helper child whose $PPID is us.
+capture_self_pid() {
   if [ -n "${BASHPID:-}" ]; then
-    echo "$BASHPID"
+    MY_PID="$BASHPID"
   else
-    sh -c 'echo $PPID'
+    local _tmp
+    _tmp=$(mktemp -t exomem-pid)
+    sh -c 'echo $PPID > "$0"' "$_tmp"
+    MY_PID=$(cat "$_tmp")
+    rm -f "$_tmp"
   fi
 }
 
 # Atomic lock acquisition via noclobber + PID liveness check for stale.
 # Returns 0 if acquired, 1 if held by another live process.
+# my_pid must be passed in (computed via capture_self_pid) — computing it
+# here via $() would store a transient subshell PID that dies immediately.
 acquire_lock() {
   local lockfile="$1"
-  local my_pid
-  my_pid=$(get_my_pid)
+  local my_pid="$2"
   if ( set -o noclobber; echo "$my_pid" > "$lockfile" ) 2>/dev/null; then
     return 0
   fi
@@ -224,7 +234,8 @@ LOG="$VAULT/.ingest.log"
 # nohup + disown lets it survive parent shell death (Claude Code exit, tmux
 # kill-server, terminal close — adopted by launchd).
 (
-  if ! acquire_lock "$LOCK"; then
+  capture_self_pid
+  if ! acquire_lock "$LOCK" "$MY_PID"; then
     exit 0
   fi
   trap 'rm -f "$LOCK"; date +%s > "$VAULT/.last-ingest"' EXIT
