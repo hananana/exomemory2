@@ -95,4 +95,149 @@ body="$(
 } > "$out_md"
 
 echo "[exomemory2] captured: $out_md" >&2
+
+# ===========================================================================
+# Auto-ingest gate (v0.2+)
+#
+# After capturing the handover, optionally spawn a background `claude -p`
+# process to ingest it into the wiki. Controlled by <vault>/.exomemory-config
+# (strictly parsed; never `source`d, see security note in load_config).
+# ===========================================================================
+
+# Strict whitelist parser for .exomemory-config.
+# Only KEY=INT lines for known keys are honored; any other content is ignored.
+load_config() {
+  local config="$1"
+  AUTO_INGEST=1
+  AUTO_INGEST_THRESHOLD=3
+  AUTO_INGEST_INTERVAL_SEC=1800
+  [ -f "$config" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      \#*|"") continue ;;
+    esac
+    if [[ "$line" =~ ^([A-Z_][A-Z0-9_]*)=([0-9]+)$ ]]; then
+      local key="${BASH_REMATCH[1]}"
+      local val="${BASH_REMATCH[2]}"
+      case "$key" in
+        AUTO_INGEST) AUTO_INGEST="$val" ;;
+        AUTO_INGEST_THRESHOLD) AUTO_INGEST_THRESHOLD="$val" ;;
+        AUTO_INGEST_INTERVAL_SEC) AUTO_INGEST_INTERVAL_SEC="$val" ;;
+      esac
+    fi
+  done < "$config"
+}
+
+# Count handovers in raw/ that are not yet ingested or have changed.
+count_dirty_handovers() {
+  local vault="$1"
+  local handovers_dir="$vault/raw/handovers"
+  local sources_dir="$vault/wiki/sources"
+  local count=0
+  [ -d "$handovers_dir" ] || { echo 0; return; }
+  for raw_file in "$handovers_dir"/*.md; do
+    [ -f "$raw_file" ] || continue
+    local basename slug wiki_page stored_hash current_hash
+    basename=$(basename "$raw_file")
+    slug="handovers--${basename%.md}"
+    wiki_page="$sources_dir/$slug.md"
+    if [ ! -f "$wiki_page" ]; then
+      count=$((count + 1))
+      continue
+    fi
+    stored_hash=$(awk '
+      /^---$/ { in_fm = !in_fm; next }
+      in_fm && /^source_hash:/ {
+        val = $2; gsub(/^"|"$/, "", val); sub(/^sha256:/, "", val); print val; exit
+      }
+    ' "$wiki_page")
+    current_hash=$(shasum -a 256 "$raw_file" | awk '{print $1}')
+    if [ "$stored_hash" != "$current_hash" ]; then
+      count=$((count + 1))
+    fi
+  done
+  echo "$count"
+}
+
+# Subshell-aware PID. Bash 4+ has $BASHPID; Bash 3 (macOS default) does not.
+get_my_pid() {
+  if [ -n "${BASHPID:-}" ]; then
+    echo "$BASHPID"
+  else
+    sh -c 'echo $PPID'
+  fi
+}
+
+# Atomic lock acquisition via noclobber + PID liveness check for stale.
+# Returns 0 if acquired, 1 if held by another live process.
+acquire_lock() {
+  local lockfile="$1"
+  local my_pid
+  my_pid=$(get_my_pid)
+  if ( set -o noclobber; echo "$my_pid" > "$lockfile" ) 2>/dev/null; then
+    return 0
+  fi
+  local old_pid
+  old_pid=$(cat "$lockfile" 2>/dev/null)
+  if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+    return 1
+  fi
+  rm -f "$lockfile"
+  if ( set -o noclobber; echo "$my_pid" > "$lockfile" ) 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
+# Load per-vault config (defaults applied if file is missing).
+load_config "$VAULT/.exomemory-config"
+
+if [ "$AUTO_INGEST" != "1" ]; then
+  exit 0
+fi
+
+DIRTY=$(count_dirty_handovers "$VAULT")
+if [ "$DIRTY" -lt "$AUTO_INGEST_THRESHOLD" ]; then
+  echo "[exomemory2] auto-ingest: $DIRTY dirty < threshold $AUTO_INGEST_THRESHOLD, skipping" >&2
+  exit 0
+fi
+
+if [ -f "$VAULT/.last-ingest" ]; then
+  LAST=$(cat "$VAULT/.last-ingest" 2>/dev/null)
+  NOW=$(date +%s)
+  if [ -n "$LAST" ] && [ $((NOW - LAST)) -lt "$AUTO_INGEST_INTERVAL_SEC" ]; then
+    echo "[exomemory2] auto-ingest: last run $((NOW - LAST))s ago < interval $AUTO_INGEST_INTERVAL_SEC, skipping" >&2
+    exit 0
+  fi
+fi
+
+# Verify `claude` is available before spawning.
+if ! command -v claude >/dev/null 2>&1; then
+  echo "[exomemory2] auto-ingest: 'claude' CLI not found in PATH, skipping" >&2
+  exit 0
+fi
+
+LOCK="$VAULT/.ingest.lock"
+LOG="$VAULT/.ingest.log"
+
+# Background subshell owns the lock for the lifetime of `claude -p`.
+# nohup + disown lets it survive parent shell death (Claude Code exit, tmux
+# kill-server, terminal close — adopted by launchd).
+(
+  if ! acquire_lock "$LOCK"; then
+    exit 0
+  fi
+  trap 'rm -f "$LOCK"; date +%s > "$VAULT/.last-ingest"' EXIT
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"/exomemory2:wiki-ingest raw/handovers/"}}' | \
+    EXOMEMORY_VAULT="$VAULT" nohup claude -p \
+      --input-format stream-json \
+      --output-format stream-json \
+      --verbose \
+      --no-session-persistence \
+      --permission-mode bypassPermissions \
+      >>"$LOG" 2>&1
+) </dev/null >/dev/null 2>&1 &
+disown
+
+echo "[exomemory2] auto-ingest: spawned background ingest ($DIRTY dirty handover(s))" >&2
 exit 0

@@ -1,0 +1,8 @@
+# exomemory2 runtime state — not for version control
+.ingest.lock
+.ingest.log
+.last-ingest
+
+# Obsidian per-user state (the rest of .obsidian/ is committed)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json

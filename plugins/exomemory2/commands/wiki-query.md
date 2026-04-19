@@ -60,6 +60,31 @@ Set EXOMEMORY_VAULT, pass --vault, or cd into a vault.
 
 Call the resolved absolute vault path `VAULT`.
 
+## Step 2.5: Wait for any in-progress auto-ingest
+
+To avoid reading a half-updated wiki while a background `claude -p "/wiki-ingest …"` (spawned by the SessionEnd / PreCompact hooks) is still writing, briefly wait for the lock to clear.
+
+```bash
+LOCK="<VAULT>/.ingest.lock"
+WAIT_TIMEOUT=300  # seconds
+waited=0
+while [ -f "$LOCK" ]; do
+  pid=$(cat "$LOCK" 2>/dev/null)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    # Stale lock (process died without cleanup). Proceed.
+    break
+  fi
+  if [ "$waited" -ge "$WAIT_TIMEOUT" ]; then
+    echo "[wiki-query] auto-ingest still running after ${WAIT_TIMEOUT}s, proceeding with possibly inconsistent state" >&2
+    break
+  fi
+  sleep 2
+  waited=$((waited + 2))
+done
+```
+
+If `<VAULT>/.ingest.lock` is absent, this step is effectively a no-op — proceed immediately.
+
 ## Step 3: Load the schema
 
 Read `<VAULT>/WIKI.md` for page formats and wikilink conventions.

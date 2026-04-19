@@ -23,7 +23,7 @@
 
 ## ステータス
 
-初期 MVP (v0.1)。コアの ingest / query / 自動capture は動作する。Obsidian を推奨フロントエンドとし、vault template に設定プリセット（graph の色分け、推奨コアプラグインの有効化）を同梱。graph-aware lint、Bases/Canvas テンプレート、複数 vault ルーティングは今後実装予定。
+v0.2。コアの ingest / query / 自動capture / 自動ingest（バックグラウンド spawn、設定ファイル制御）が動作する。Obsidian を推奨フロントエンドとし、vault template に設定プリセット（graph の色分け、推奨コアプラグインの有効化）を同梱。graph-aware lint、Bases/Canvas テンプレート、複数 vault ルーティングは今後実装予定。
 
 ## データフロー
 
@@ -40,12 +40,24 @@
 │ <vault>/raw/handovers/<session-id>.md 書き出し（上書き）     │
 └─────────────────────────────────────────────────────────────┘
 
-                    ⏸ 自動 ingest はしない（v0.2 で実装予定）
+┌─────────────────────────────────────────────────────────────┐
+│ Phase B': 自動 ingest gate（v0.2+、capture直後、まだ Claude  │
+│           には触れない、shell のみで判定）                    │
+│                                                              │
+│ .exomemory-config を厳密パース（KEY=INT のみ）                │
+│  ↓                                                           │
+│ dirty 件数 ≥ AUTO_INGEST_THRESHOLD?                          │
+│ 前回 ingest から AUTO_INGEST_INTERVAL_SEC 経過？              │
+│  ↓ 全部 yes なら spawn                                       │
+│ nohup claude -p "/exomemory2:wiki-ingest raw/handovers/" &   │
+│  ↓                                                           │
+│ hook 即終了 → ユーザーセッションは即クローズ                  │
+└─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
-│ Phase B: 手動 ingest（ユーザーが発火、Claude がwiki構築）     │
+│ Phase B: ingest（手動 or 自動 spawn の Claude が wiki 構築）  │
 │                                                              │
-│ /wiki-ingest raw/handovers/<session-id>.md                   │
+│ /wiki-ingest [raw/handovers/<session-id>.md]                 │
 │  ↓                                                           │
 │ Claude が WIKI.md スキーマを読み込み                         │
 │  ↓                                                           │
@@ -53,6 +65,8 @@
 │ entities/ に登場人物ページ生成 or MERGE                       │
 │ concepts/ に概念ページ生成 or MERGE                           │
 │ index.md / overview.md / log.md 更新                         │
+│  ↓                                                           │
+│ .last-ingest 更新、.ingest.lock 解放                          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -256,15 +270,91 @@ last_captured_at: "2026-04-19T04:12:34Z"
 
 いずれか満たされない場合、hook は stderr に警告を出して `exit 0` する（セッション終了はブロックしない）。
 
-### Hook と ingest の関係
+## 自動 ingest（v0.2+）
 
-**自動 capture と自動 ingest は分離されている**。hook は raw ファイルを書くだけで、wiki の生成には触らない。理由：
+PreCompact / SessionEnd hook 後に、未 ingest の handover が一定数溜まっていれば、`claude -p` をバックグラウンドで spawn して自動的に wiki に取り込む。**デフォルトで有効**。
 
-- `/compact` やセッション終了は LLM 処理のタイミングに向かない（ユーザーが移動しようとしている）
-- ingest 失敗が可視化されないリスクを避ける
-- プライバシーの都合で「wiki 化前に raw をレビューしたい」ケースに対応
+### 動作の概要
 
-実用上は週次などで `/wiki-ingest`（引数なし）を走らせて一括取り込みするのが現実的。v0.2 で `SessionStart` ベースの自動 ingest（opt-in）を追加予定。
+```
+ユーザーが /compact または /exit
+  ↓
+capture.sh が handover を raw/handovers/<session-id>.md に書き出す
+  ↓
+gate を評価:
+  - <vault>/.exomemory-config の AUTO_INGEST=1 か？
+  - dirty 件数 ≥ AUTO_INGEST_THRESHOLD か？
+  - 前回 ingest から AUTO_INGEST_INTERVAL_SEC 以上経過しているか？
+  ↓ all yes
+nohup claude -p ... & disown でバックグラウンド spawn
+  ↓
+hook 即終了（数ms）→ ユーザーセッション完全クローズ
+  ↓ （別 Claude プロセスが裏で 2-3 分 ingest）
+wiki/ 更新、log.md 追記、.last-ingest 更新
+  ↓
+プロセス終了、lock 解放
+```
+
+`/exit` 直後にターミナルが返る点は変わらない。LLM 呼び出しはバックグラウンドジョブとして launchd 養子プロセスで進行するので、tmux kill-server や Terminal.app 終了でも生き残る（macOS シャットダウンでは止まる）。
+
+### 設定: `<vault>/.exomemory-config`
+
+`/wiki-init` で作る vault に同梱されるファイル。`KEY=INT` 形式の **厳密パース**（`source` はしない、悪意あるシェル content 実行を防ぐため）。
+
+```
+# Automatic ingest of handover files
+# 1 = enabled (default), 0 = disabled
+AUTO_INGEST=1
+
+# Number of dirty (un-ingested or changed) handovers required to trigger
+AUTO_INGEST_THRESHOLD=3
+
+# Minimum seconds between auto-ingest runs
+AUTO_INGEST_INTERVAL_SEC=1800
+```
+
+設定ファイルがない or キー未指定なら上記デフォルト値が使われる。**自動 ingest を完全に止めたい場合**は `AUTO_INGEST=0` を書く。
+
+### 並行実行制御
+
+`<vault>/.ingest.lock` に subshell の PID を書き、PID 生存確認（`kill -0`）で stale 判定する。プロセスが死ねば次回起動時に自動的に lock を奪取できる（時刻リースは使わない、長時間 ingest にも安全）。
+
+`/wiki-query` も同じ lock を見て、ingest 中なら最大 5 分待機してから読み取りを始める（読み取り整合性確保）。
+
+### 対象範囲
+
+- **handover のみ**: `raw/handovers/*.md` だけが自動 ingest 対象
+- `raw/papers/`、`raw/web/` 等は手動で `/wiki-ingest raw/papers/` を叩く運用
+
+意図しない LLM 起動とコスト暴走を避けるため、配置範囲を意図的に絞っている。
+
+### ログとデバッグ
+
+- `<vault>/.ingest.log` にすべての stream-json 出力が append される（debug 用）
+- `<vault>/.last-ingest` に前回 ingest 完了時刻（epoch 秒）
+- `<vault>/.ingest.lock` 実行中のロック（PID 入り）
+
+これら 3 ファイルは template の `.gitignore` に含まれている。`.exomemory-config` は git に commit してOK。
+
+### SessionStart 時の通知
+
+新セッション開始時、`.last-ingest` のタイムスタンプを `additionalContext` で Claude に注入する（hidden context、ユーザー非表示）:
+
+```
+exomemory2: last auto-ingest at 2026-04-19 11:35:42 (12m ago).
+```
+
+これにより Claude は wiki の鮮度を認識でき、auto ingest が止まっている場合（最終 ingest が古すぎるなど）も検知できる。
+
+### コストと所要時間（実測）
+
+handover 1件の ingest で約 **160秒 / 31 turns**。Claude Max プランの認証経由 (`apiKeySource: none`) なら追加の課金は発生しないが、利用枠を消費する。`AUTO_INGEST_INTERVAL_SEC=1800`（30分）と `AUTO_INGEST_THRESHOLD=3` のデフォルトは「日次1〜2回」程度の頻度に収める意図。
+
+### 必須要件
+
+- `claude` コマンドが PATH にある（hook が `command -v claude` でチェック、無ければ silent skip）
+- vault に `WIKI.md` が存在する
+- `jq` が PATH にある（capture 機能と共有）
 
 ## コマンド一覧
 

@@ -1,0 +1,23 @@
+# .exomemory-config — exomemory2 vault settings
+#
+# This file is parsed STRICTLY (KEY=INT only). It is NEVER `source`d by the
+# plugin, so arbitrary shell content here cannot be executed. Unknown keys
+# and any other line shapes (quoted values, command substitutions, etc.)
+# are silently ignored.
+#
+# Commit this file to git if you want to share vault settings. The runtime
+# state files (.ingest.lock, .ingest.log, .last-ingest) are gitignored.
+
+# Automatic ingest of handover files after PreCompact / SessionEnd hooks.
+# 1 = enabled (default), 0 = disabled.
+AUTO_INGEST=1
+
+# Number of dirty (un-ingested or changed) handovers required before
+# auto-ingest is triggered. Lower values run more often, higher values
+# batch handovers together.
+AUTO_INGEST_THRESHOLD=3
+
+# Minimum seconds between auto-ingest runs. Even if dirty count exceeds
+# the threshold, auto-ingest skips when the previous run finished less
+# than this many seconds ago.
+AUTO_INGEST_INTERVAL_SEC=1800

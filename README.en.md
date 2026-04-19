@@ -23,7 +23,7 @@ Drop source documents into `raw/`, run `/wiki-ingest`, and Claude compiles them 
 
 ## Status
 
-Early MVP (v0.1). Core ingest, query, and auto-capture work. Obsidian is the recommended frontend, and the vault template ships with a preset (graph color coding, recommended core plugins enabled). Graph-aware lint, Bases/Canvas templates, and multi-vault routing are planned for later.
+v0.2. Core ingest / query / auto-capture / **auto-ingest** (background-spawned, config-file controlled) all work. Obsidian is the recommended frontend, and the vault template ships with a preset (graph color coding, recommended core plugins enabled). Graph-aware lint, Bases/Canvas templates, and multi-vault routing are planned for later.
 
 Supersedes [hananana/exomemory](https://github.com/hananana/exomemory) (v1), which used cognitive-science-inspired memory tiers. v2 is a ground-up redesign around Karpathy's wiki pattern.
 
@@ -144,6 +144,77 @@ Unchanged files are skipped via `source_hash` match, so rerunning is cheap. Poin
 ### 5. Auto-capture
 
 Once `EXOMEMORY_VAULT` (or the legacy `CLAUDE_MEMORY_VAULT`) is set, the plugin's hooks write a markdown handover file to `raw/handovers/<session-id>.md` on every `/compact` and session exit. The no-argument `/wiki-ingest` picks them up on the next run. Point explicitly at `/wiki-ingest raw/handovers/` if you want handovers only.
+
+Starting in v0.2, **auto-ingest is enabled by default**: after each capture, if enough handovers have piled up and enough time has elapsed since the previous run, a background `claude -p` process is spawned to fold them into the wiki — without blocking your `/exit`. See "Auto-ingest" below for tuning and disabling.
+
+## Auto-ingest (v0.2+)
+
+After each PreCompact / SessionEnd, capture.sh evaluates a gate and, if all conditions hold, spawns a background `claude -p` to ingest the new handovers. **Enabled by default.**
+
+### Flow
+
+```
+User runs /compact or /exit
+  ↓
+capture.sh writes handover to raw/handovers/<session-id>.md
+  ↓
+Gate check:
+  - <vault>/.exomemory-config: AUTO_INGEST=1?
+  - dirty count ≥ AUTO_INGEST_THRESHOLD?
+  - elapsed since last ingest ≥ AUTO_INGEST_INTERVAL_SEC?
+  ↓ all yes
+nohup claude -p "/exomemory2:wiki-ingest raw/handovers/" & disown
+  ↓
+hook returns immediately (a few ms) — your terminal closes
+  ↓ (in the background, ~2-3 min)
+wiki/ updated, log.md appended, .last-ingest updated
+  ↓
+process exits, lock released
+```
+
+`/exit` still returns instantly. The background ingest survives `tmux kill-server` and Terminal.app close (adopted by `launchd`); it stops on macOS shutdown / logout.
+
+### Configuration: `<vault>/.exomemory-config`
+
+Bundled with every `/wiki-init` vault. **Strictly parsed** as `KEY=INT` lines (never `source`d, to prevent shell injection through vault content):
+
+```
+AUTO_INGEST=1                   # 1 = enabled (default), 0 = disabled
+AUTO_INGEST_THRESHOLD=3         # min dirty handovers to trigger
+AUTO_INGEST_INTERVAL_SEC=1800   # min seconds between runs
+```
+
+**To disable auto-ingest entirely**, set `AUTO_INGEST=0`.
+
+### Concurrency control
+
+`<vault>/.ingest.lock` holds the spawning subshell's PID. Stale locks are detected via `kill -0` (no time-based lease — long ingests are safe). `/wiki-query` waits up to 5 minutes for a held lock to clear, ensuring read consistency.
+
+### Scope
+
+Only `raw/handovers/*.md` is ingested automatically. Other `raw/` subdirectories (`raw/papers/`, `raw/web/`, ...) require manual `/wiki-ingest raw/papers/` to avoid surprise LLM runs.
+
+### State files (gitignored)
+
+- `.ingest.log` — full stream-json output of background runs (debug)
+- `.last-ingest` — last completion timestamp (epoch seconds)
+- `.ingest.lock` — held during a run
+
+The template `.gitignore` covers these. `.exomemory-config` is **not** ignored; commit it if you wish.
+
+### SessionStart hook
+
+On new sessions, exomemory2 injects a one-liner into Claude's hidden context: `exomemory2: last auto-ingest at YYYY-MM-DD HH:MM:SS (Nm ago)`. This lets Claude notice wiki freshness and silent ingest failures without bothering the user.
+
+### Cost / runtime (measured)
+
+Roughly **160 seconds / 31 turns** per handover. With Claude Max plan auth (`apiKeySource: none`), no extra billing — but it consumes plan quota. Defaults (`THRESHOLD=3`, `INTERVAL=1800`) aim for one or two runs per day, not per session.
+
+### Requirements
+
+- `claude` CLI in PATH (capture.sh checks with `command -v claude` and silent-skips otherwise)
+- vault has `WIKI.md`
+- `jq` in PATH (shared with the capture path)
 
 ## Commands
 
