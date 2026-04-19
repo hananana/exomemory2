@@ -107,7 +107,7 @@ Vault created at: <VAULT_ABS>
 
 Next steps:
   1. Set the active vault environment variable:
-       export CLAUDE_MEMORY_VAULT="<VAULT_ABS>"
+       export EXOMEMORY_VAULT="<VAULT_ABS>"
      (add to ~/.zshrc or ~/.bashrc for persistence)
   2. Drop source documents into: <VAULT_ABS>/raw/
   3. Ingest them: /wiki-ingest <file>
@@ -139,6 +139,6 @@ Finally, always append:
 
 ```
 Automatic capture of Claude conversations kicks in once
-$CLAUDE_MEMORY_VAULT is set. PreCompact and SessionEnd hooks write
+$EXOMEMORY_VAULT is set. PreCompact and SessionEnd hooks write
 handover files to <VAULT_ABS>/raw/handovers/<session-id>.md.
 ```

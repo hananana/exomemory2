@@ -37,9 +37,9 @@ Try in order:
    ```bash
    test -f "<explicit-vault>/WIKI.md" && echo "OK" || echo "MISSING"
    ```
-2. `CLAUDE_MEMORY_VAULT` env var:
+2. `EXOMEMORY_VAULT` env var (preferred); falls back to `CLAUDE_MEMORY_VAULT` (deprecated, removed in v0.3 — emit a stderr warning when used):
    ```bash
-   echo "${CLAUDE_MEMORY_VAULT:-}"
+   echo "${EXOMEMORY_VAULT:-${CLAUDE_MEMORY_VAULT:-}}"
    ```
 3. Ancestor search from cwd:
    ```bash
@@ -55,7 +55,7 @@ If none found, stop:
 
 ```
 Vault not found.
-Set CLAUDE_MEMORY_VAULT, pass --vault, or cd into a vault.
+Set EXOMEMORY_VAULT, pass --vault, or cd into a vault.
 ```
 
 Call the resolved absolute vault path `VAULT`.

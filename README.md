@@ -144,10 +144,12 @@ diff -r "$SRC" <your-vault>/.obsidian
 環境変数で恒久設定（推奨）：
 
 ```bash
-export CLAUDE_MEMORY_VAULT=~/vault-personal
+export EXOMEMORY_VAULT=~/vault-personal
 ```
 
 あるいは各コマンドに `--vault <path>` を渡す、または vault 配下に `cd`（ancestor search が効く）。
+
+> **Note:** v0.1 までは `CLAUDE_MEMORY_VAULT` という環境変数名を使っていた。後方互換のため `EXOMEMORY_VAULT` 未設定時は `CLAUDE_MEMORY_VAULT` をフォールバックで読むが、deprecation 警告が出る。**v0.3 で `CLAUDE_MEMORY_VAULT` サポートは削除予定**。`~/.zshrc` 等を `EXOMEMORY_VAULT` に書き換えること。
 
 ### 3. ソースを ingest
 
@@ -196,7 +198,7 @@ handover だけを対象にしたい場合は従来通り `/wiki-ingest raw/hand
 - **`/clear` コマンド**: 対応 hook が存在しない（Claude Code の既知制約）。clear 前に手動で `/compact` を走らせれば capture される
 - **Ctrl+C による強制中断**: hook は走らない
 - **Claude Code のクラッシュ**: hook は走らない
-- **`$CLAUDE_MEMORY_VAULT` 未設定**: hook は silent skip（stderr に警告のみ）
+- **`$EXOMEMORY_VAULT` 未設定**: hook は silent skip（stderr に警告のみ）
 - **vault に `WIKI.md` が無い**: 同じく silent skip
 
 ### ファイル命名規則
@@ -248,7 +250,7 @@ last_captured_at: "2026-04-19T04:12:34Z"
 
 | 条件 | 必須 |
 |---|---|
-| `$CLAUDE_MEMORY_VAULT` が設定されている | Yes |
+| `$EXOMEMORY_VAULT`（または旧 `$CLAUDE_MEMORY_VAULT`）が設定されている | Yes |
 | 指定 vault に `WIKI.md` が存在する | Yes |
 | `jq` が PATH にある | Yes |
 
@@ -307,7 +309,7 @@ last_captured_at: "2026-04-19T04:12:34Z"
 ### `/wiki-ingest` が `Vault not found` を返す
 
 次のいずれかが必要：
-- `export CLAUDE_MEMORY_VAULT=<path>` で vault 指定
+- `export EXOMEMORY_VAULT=<path>` で vault 指定（旧 `CLAUDE_MEMORY_VAULT` も後方互換でフォールバック、deprecation 警告つき）
 - コマンドに `--vault <path>` を追加
 - vault ディレクトリ配下に `cd` する（ancestor search が効く）
 
@@ -315,13 +317,14 @@ last_captured_at: "2026-04-19T04:12:34Z"
 
 以下を順に確認：
 
-1. `$CLAUDE_MEMORY_VAULT` が設定されているか:
+1. `$EXOMEMORY_VAULT`（または旧 `$CLAUDE_MEMORY_VAULT`）が設定されているか:
    ```bash
-   echo $CLAUDE_MEMORY_VAULT
+   echo "${EXOMEMORY_VAULT:-${CLAUDE_MEMORY_VAULT:-}}"
    ```
 2. その vault に `WIKI.md` があるか:
    ```bash
-   test -f "$CLAUDE_MEMORY_VAULT/WIKI.md" && echo OK
+   VAULT="${EXOMEMORY_VAULT:-${CLAUDE_MEMORY_VAULT:-}}"
+   test -f "$VAULT/WIKI.md" && echo OK
    ```
 3. `jq` がインストールされているか:
    ```bash

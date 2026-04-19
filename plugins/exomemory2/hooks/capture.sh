@@ -7,20 +7,25 @@
 # multiple compacts within one session converge into a single file.
 #
 # Requires: jq
-# Behavior: exits silently (0) if CLAUDE_MEMORY_VAULT is unset or the
-# transcript is unreadable.
+# Behavior: exits silently (0) if EXOMEMORY_VAULT (or legacy
+# CLAUDE_MEMORY_VAULT) is unset or the transcript is unreadable.
 
 set -eo pipefail
 
-# Require CLAUDE_MEMORY_VAULT. Skip silently if not configured.
-if [ -z "${CLAUDE_MEMORY_VAULT:-}" ]; then
-  echo "[exomemory2] CLAUDE_MEMORY_VAULT not set, skipping capture" >&2
+# Resolve vault: EXOMEMORY_VAULT preferred, CLAUDE_MEMORY_VAULT for backward
+# compatibility (deprecated, will be removed in v0.3).
+VAULT="${EXOMEMORY_VAULT:-${CLAUDE_MEMORY_VAULT:-}}"
+if [ -z "$VAULT" ]; then
+  echo "[exomemory2] EXOMEMORY_VAULT not set, skipping capture" >&2
   exit 0
+fi
+if [ -z "${EXOMEMORY_VAULT:-}" ] && [ -n "${CLAUDE_MEMORY_VAULT:-}" ]; then
+  echo "[exomemory2] CLAUDE_MEMORY_VAULT is deprecated; please use EXOMEMORY_VAULT (will be removed in v0.3)" >&2
 fi
 
 # Validate the vault exists and looks like a vault.
-if [ ! -f "${CLAUDE_MEMORY_VAULT}/WIKI.md" ]; then
-  echo "[exomemory2] \$CLAUDE_MEMORY_VAULT does not contain WIKI.md: ${CLAUDE_MEMORY_VAULT}" >&2
+if [ ! -f "${VAULT}/WIKI.md" ]; then
+  echo "[exomemory2] vault path does not contain WIKI.md: ${VAULT}" >&2
   exit 0
 fi
 
@@ -47,7 +52,7 @@ if [ -z "$session_id" ]; then
   exit 0
 fi
 
-handover_dir="${CLAUDE_MEMORY_VAULT}/raw/handovers"
+handover_dir="${VAULT}/raw/handovers"
 mkdir -p "$handover_dir"
 
 out_md="${handover_dir}/${session_id}.md"

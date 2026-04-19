@@ -30,11 +30,11 @@ Try in order; stop at the first success. Use `Bash` tool for each check:
    ```bash
    test -f "<explicit-vault>/WIKI.md" && echo "OK" || echo "MISSING"
    ```
-2. **Environment variable** `CLAUDE_MEMORY_VAULT`:
+2. **Environment variable** `EXOMEMORY_VAULT` (preferred) or `CLAUDE_MEMORY_VAULT` (deprecated, falls back if `EXOMEMORY_VAULT` is unset; will be removed in v0.3):
    ```bash
-   echo "${CLAUDE_MEMORY_VAULT:-}"
+   echo "${EXOMEMORY_VAULT:-${CLAUDE_MEMORY_VAULT:-}}"
    ```
-   If non-empty, verify `WIKI.md` exists at that path.
+   If non-empty, verify `WIKI.md` exists at that path. If only the legacy `CLAUDE_MEMORY_VAULT` is set, also emit a deprecation warning to stderr.
 3. **Ancestor search** from current working directory upward, looking for a directory containing `WIKI.md`:
    ```bash
    pwd
@@ -49,7 +49,7 @@ If no vault is resolved, **stop** and reply:
 
 ```
 Vault not found.
-Set CLAUDE_MEMORY_VAULT to a vault path, pass --vault <path>, or cd into a vault.
+Set EXOMEMORY_VAULT to a vault path, pass --vault <path>, or cd into a vault.
 Run /wiki-init <path> to create one.
 ```
 

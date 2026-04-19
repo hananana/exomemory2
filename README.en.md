@@ -113,10 +113,12 @@ This creates a vault skeleton at `~/vault-personal/` containing `WIKI.md`, `raw/
 Either export an environment variable (persistent):
 
 ```bash
-export CLAUDE_MEMORY_VAULT=~/vault-personal
+export EXOMEMORY_VAULT=~/vault-personal
 ```
 
 Or pass `--vault <path>` to each command, or `cd` into the vault (ancestor search).
+
+> **Note:** Up to v0.1 the variable was `CLAUDE_MEMORY_VAULT`. For backward compatibility, when `EXOMEMORY_VAULT` is unset the plugin still reads `CLAUDE_MEMORY_VAULT` (with a deprecation warning). **Support will be removed in v0.3** — please migrate your `~/.zshrc` to `EXOMEMORY_VAULT`.
 
 ### 3. Ingest sources
 
@@ -141,7 +143,7 @@ Unchanged files are skipped via `source_hash` match, so rerunning is cheap. Poin
 
 ### 5. Auto-capture
 
-Once `CLAUDE_MEMORY_VAULT` is set, the plugin's hooks write a markdown handover file to `raw/handovers/<session-id>.md` on every `/compact` and session exit. The no-argument `/wiki-ingest` picks them up on the next run. Point explicitly at `/wiki-ingest raw/handovers/` if you want handovers only.
+Once `EXOMEMORY_VAULT` (or the legacy `CLAUDE_MEMORY_VAULT`) is set, the plugin's hooks write a markdown handover file to `raw/handovers/<session-id>.md` on every `/compact` and session exit. The no-argument `/wiki-ingest` picks them up on the next run. Point explicitly at `/wiki-ingest raw/handovers/` if you want handovers only.
 
 ## Commands
 
