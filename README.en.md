@@ -33,13 +33,7 @@ Supersedes [hananana/exomemory](https://github.com/hananana/exomemory) (v1), whi
 |---|---|
 | `jq` | Capture hook uses it to extract transcript JSON (required) |
 | `python3` | Used by `/wiki-init` for path expansion (ships on macOS / most Linux distros by default) |
-| [Obsidian](https://obsidian.md) | Frontend for browsing the vault (optional, recommended) |
-
-On macOS, install `jq` if missing:
-
-```
-brew install jq
-```
+| [Obsidian](https://obsidian.md) | **Strongly recommended.** Technically optional — the vault is plain Markdown and works in any editor — but the UX Karpathy's original gist assumes (Graph View / Backlinks / Web Clipper / Dataview) only comes together in Obsidian. Skipping it means losing half of the LLM-wiki pattern |
 
 ## Install
 
@@ -131,8 +125,6 @@ export EXOMEMORY_VAULT=~/vault-personal
 
 Or pass `--vault <path>` to each command, or `cd` into the vault (ancestor search).
 
-> **Note:** Up to v0.1 the variable was `CLAUDE_MEMORY_VAULT`. For backward compatibility, when `EXOMEMORY_VAULT` is unset the plugin still reads `CLAUDE_MEMORY_VAULT` (with a deprecation warning). **Support will be removed in v0.3** — please migrate your `~/.zshrc` to `EXOMEMORY_VAULT`.
-
 ### 3. Ingest sources
 
 Drop markdown into `raw/`, then run with no arguments to scan the whole `raw/` tree:
@@ -156,7 +148,7 @@ Unchanged files are skipped via `source_hash` match, so rerunning is cheap. Poin
 
 ### 5. Auto-capture
 
-Once `EXOMEMORY_VAULT` (or the legacy `CLAUDE_MEMORY_VAULT`) is set, the plugin's hooks write a markdown handover file to `raw/handovers/<session-id>.md` on every `/compact` and session exit. The no-argument `/wiki-ingest` picks them up on the next run. Point explicitly at `/wiki-ingest raw/handovers/` if you want handovers only.
+Once `EXOMEMORY_VAULT` is set, the plugin's hooks write a markdown handover file to `raw/handovers/<session-id>.md` on every `/compact` and session exit. The no-argument `/wiki-ingest` picks them up on the next run. Point explicitly at `/wiki-ingest raw/handovers/` if you want handovers only.
 
 Starting in v0.2, **auto-ingest is enabled by default**: after each capture, if enough handovers have piled up and enough time has elapsed since the previous run, a background `claude -p` process is spawned to fold them into the wiki — without blocking your `/exit`. See "Auto-ingest" below for tuning and disabling.
 
