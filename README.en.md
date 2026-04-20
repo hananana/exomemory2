@@ -105,48 +105,28 @@ Remove the backup once you're satisfied: `rm -rf <your-vault>/.obsidian.bak`
 ### 1. Create a vault
 
 ```
-/wiki-init              # create at the default ~/vault
-/wiki-init ~/vault-personal   # or pass an explicit path
+/wiki-init
 ```
 
-This creates a vault skeleton at the given path (default: `~/vault`) containing `WIKI.md`, `raw/`, `wiki/`, and `.obsidian/` (recommended preset). If Obsidian is not installed, `/wiki-init` prints install instructions at the end. Opening the vault in Obsidian afterwards is recommended.
+This creates a vault skeleton at `~/vault` containing `WIKI.md`, `raw/`, `wiki/`, and `.obsidian/` (recommended preset). Pass an explicit path if you want somewhere else: `/wiki-init ~/vault-personal`.
 
-### 2. Set the active vault
+### 2. Set `EXOMEMORY_VAULT`
 
-Either export an environment variable (persistent):
+The auto-capture hook only reads the environment variable, so conversations won't be saved without this. Add to `~/.zshrc`:
 
 ```bash
-export EXOMEMORY_VAULT=~/vault-personal
+export EXOMEMORY_VAULT=~/vault
 ```
 
-Or pass `--vault <path>` to each command, or `cd` into the vault (ancestor search).
+### 3. Open the vault in Obsidian
 
-### 3. Ingest sources
+Obsidian → "Open folder as vault" → `~/vault` (or whatever path you used above). The bundled preset activates recommended core plugins and color-codes the graph (sources blue / entities green / concepts orange). See the [Obsidian](#obsidian-recommended-frontend) section above for install details.
 
-Drop markdown into `raw/`, then run with no arguments to scan the whole `raw/` tree:
+### That's it — just keep using Claude
 
-```
-/wiki-ingest
-```
+On every `/compact` and session exit, the conversation is saved to `raw/handovers/`. Once enough accumulate, Claude is spawned in the background to compile them into the wiki. Leave Obsidian's Graph View open to watch it grow.
 
-Unchanged files are skipped via `source_hash` match, so rerunning is cheap. Point at a specific file or directory when you want to narrow the scope:
-
-```
-/wiki-ingest raw/papers/attention.md
-/wiki-ingest raw/papers/
-```
-
-### 4. Query
-
-```
-/wiki-query "What does the wiki say about attention mechanisms?"
-```
-
-### 5. Auto-capture
-
-Once `EXOMEMORY_VAULT` is set, the plugin's hooks write a markdown handover file to `raw/handovers/<session-id>.md` on every `/compact` and session exit. The no-argument `/wiki-ingest` picks them up on the next run. Point explicitly at `/wiki-ingest raw/handovers/` if you want handovers only.
-
-Starting in v0.2, **auto-ingest is enabled by default**: after each capture, if enough handovers have piled up and enough time has elapsed since the previous run, a background `claude -p` process is spawned to fold them into the wiki — without blocking your `/exit`. See "Auto-ingest" below for tuning and disabling.
+See [Commands](#commands) for manual ingest / query (for papers, web clippings, or direct wiki queries).
 
 ## Auto-ingest (v0.2+)
 
