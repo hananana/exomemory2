@@ -14,18 +14,14 @@
 </h4>
 
 <h3 align="center">
-    <p>External memory wiki for Claude Code — a plugin implementation of Karpathy's LLM Wiki pattern</p>
+    <p>An external memory that lets Claude grow its own wiki from your conversations</p>
 </h3>
 
 A Claude Code plugin that implements [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) as an external memory for Claude.
 
-Drop source documents into `raw/`, run `/wiki-ingest`, and Claude compiles them into a persistent, interlinked markdown wiki. Query the accumulated knowledge with `/wiki-query`. Conversations captured automatically on `/compact` and session exit.
+**The focus is automation.** Every time a session ends, the conversation is saved to the vault's `raw/` directory, and once enough has accumulated, Claude is spawned in the background to compile the raw material into an interlinked markdown wiki. You don't have to do anything — the knowledge graph grows on its own as you keep using Claude.
 
-## Status
-
-v0.2. Core ingest / query / auto-capture / **auto-ingest** (background-spawned, config-file controlled) all work. Obsidian is the recommended frontend, and the vault template ships with a preset (graph color coding, recommended core plugins enabled). Graph-aware lint, Bases/Canvas templates, and multi-vault routing are planned for later.
-
-Supersedes [hananana/exomemory](https://github.com/hananana/exomemory) (v1), which used cognitive-science-inspired memory tiers. v2 is a ground-up redesign around Karpathy's wiki pattern.
+Manual `/wiki-ingest` / `/wiki-query` commands are also provided, but they're secondary — for when you want to explicitly ingest external sources (papers, web clippings) dropped into `raw/`, or query the accumulated wiki directly.
 
 ## Requirements
 

@@ -14,12 +14,14 @@
 </h4>
 
 <h3 align="center">
-    <p>Claude Code 向け外部記憶 wiki — Karpathy の LLM Wiki パターンをプラグイン化</p>
+    <p>Claude との会話から、Claude 自身が自動で wiki を育てる外部記憶</p>
 </h3>
 
 [Andrej Karpathy の LLM Wiki パターン](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)を Claude Code プラグインとして実装した、Claude 向け外部記憶システム。
 
-ソース文書を `raw/` に投入して `/wiki-ingest` を実行すると、Claude が永続的で相互リンクされた Markdown wiki にコンパイルする。蓄積された知識は `/wiki-query` で問い合わせ可能。`/compact` やセッション終了時に会話は自動でキャプチャされる。
+**主眼は自動化**。セッションを終えるたびに会話が vault の `raw/` に保存され、閾値を超えると Claude がバックグラウンドで相互リンクされた Markdown wiki にコンパイルしていく。ユーザーは何もしなくても、会話を重ねるほど知識グラフが育つ。
+
+手動の `/wiki-ingest` / `/wiki-query` コマンドも提供するが、これは補助的な位置づけ — 外部ソース（論文や Web クリップ）を `raw/` に投入して明示的に取り込んだり、蓄積された wiki に直接問い合わせたい時のためのもの。
 
 ## Requirements
 
