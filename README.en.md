@@ -27,6 +27,20 @@ v0.2. Core ingest / query / auto-capture / **auto-ingest** (background-spawned, 
 
 Supersedes [hananana/exomemory](https://github.com/hananana/exomemory) (v1), which used cognitive-science-inspired memory tiers. v2 is a ground-up redesign around Karpathy's wiki pattern.
 
+## Requirements
+
+| Item | Purpose |
+|---|---|
+| `jq` | Capture hook uses it to extract transcript JSON (required) |
+| `python3` | Used by `/wiki-init` for path expansion (ships on macOS / most Linux distros by default) |
+| [Obsidian](https://obsidian.md) | Frontend for browsing the vault (optional, recommended) |
+
+On macOS, install `jq` if missing:
+
+```
+brew install jq
+```
+
 ## Install
 
 From within Claude Code:
@@ -35,8 +49,6 @@ From within Claude Code:
 /plugin marketplace add hananana/exomemory2
 /plugin install exomemory2@exomemory2
 ```
-
-The hook script requires `jq` (usually pre-installed, otherwise `brew install jq`).
 
 ## Obsidian (recommended frontend)
 
