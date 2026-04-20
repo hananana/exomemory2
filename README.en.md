@@ -126,7 +126,23 @@ Obsidian → "Open folder as vault" → `~/vault` (or whatever path you used abo
 
 On every `/compact` and session exit, the conversation is saved to `raw/handovers/`. Once enough accumulate, Claude is spawned in the background to compile them into the wiki. Leave Obsidian's Graph View open to watch it grow.
 
-See [Commands](#commands) for manual ingest / query (for papers, web clippings, or direct wiki queries).
+### When you want to recall something from the wiki
+
+Ask `/wiki-query` directly:
+
+```
+/wiki-query "What did we figure out during the auto-ingest bug investigation last week?"
+```
+
+Claude synthesizes an answer from the relevant pages with `[[wikilink]]` citations. For manually ingesting external sources (papers, web clippings), see [Commands](#commands).
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `/wiki-init [<vault-path>]` | Scaffold a new vault (defaults to `~/vault`) |
+| `/wiki-ingest [<file-or-dir>] [--vault <path>]` | Compile raw sources into wiki pages (no argument = scan whole `raw/`) |
+| `/wiki-query <question> [--vault <path>] [--save]` | Synthesize an answer from the wiki |
 
 ## Auto-ingest (v0.2+)
 
@@ -196,14 +212,6 @@ Roughly **160 seconds / 31 turns** per handover. With Claude Max plan auth (`api
 - `claude` CLI in PATH (capture.sh checks with `command -v claude` and silent-skips otherwise)
 - vault has `WIKI.md`
 - `jq` in PATH (shared with the capture path)
-
-## Commands
-
-| Command | Purpose |
-|---|---|
-| `/wiki-init [<vault-path>]` | Scaffold a new vault (defaults to `~/vault`) |
-| `/wiki-ingest [<file-or-dir>] [--vault <path>]` | Compile raw sources into wiki pages (no argument = scan whole `raw/`) |
-| `/wiki-query <question> [--vault <path>] [--save]` | Synthesize an answer from the wiki |
 
 ## Vault layout
 
