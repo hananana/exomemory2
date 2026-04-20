@@ -74,6 +74,27 @@ When scanning `<VAULT>/raw/` with no filter (the no-argument case), it is normal
 
 ## Step 5: For each raw file, follow WIKI.md's ingest workflow
 
+### 5.0 Skip empty raw files
+
+Before computing identity, check whether the raw file has any meaningful content beyond YAML frontmatter. A file that contains only frontmatter (or only whitespace after the closing `---`) is an "empty session" and must not produce a wiki source page — those pages are noise.
+
+Detection rule: strip the first YAML frontmatter block (from the opening `---` line to the matching closing `---` line), then check whether any non-whitespace characters remain.
+
+```bash
+# Returns 0 (true) if the file is empty after stripping frontmatter.
+awk '
+  BEGIN { in_fm = 0; past_fm = 0 }
+  NR == 1 && /^---$/ { in_fm = 1; next }
+  in_fm && /^---$/ { in_fm = 0; past_fm = 1; next }
+  in_fm { next }
+  past_fm && /[^[:space:]]/ { has_body = 1; exit }
+  !past_fm && /[^[:space:]]/ { has_body = 1; exit }
+  END { exit (has_body ? 1 : 0) }
+' "<raw-file-abs>"
+```
+
+If empty, operation is `SKIP-empty`. Append `## [<today>] SKIP-empty | <slug>` to log.md once, and move to the next file. Do **not** create a wiki source page for it. Do not ERROR even if a stale source page happens to already exist — that case is handled by manual cleanup (future enhancement could auto-prune, but we don't do it here).
+
 ### 5a. Compute identity
 
 Use Bash for the hash:

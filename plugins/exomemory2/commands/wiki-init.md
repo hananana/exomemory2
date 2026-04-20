@@ -1,6 +1,6 @@
 ---
-description: Create a new external memory vault at the given path
-argument-hint: <vault-path>
+description: Create a new external memory vault (defaults to ~/vault)
+argument-hint: "[vault-path]"
 allowed-tools: Bash
 ---
 
@@ -16,16 +16,11 @@ The user-supplied argument is:
 $ARGUMENTS
 ```
 
-## Step 1: Validate the argument
+## Step 1: Resolve the argument
 
-If `$ARGUMENTS` is empty or contains only whitespace, stop immediately and reply:
+If `$ARGUMENTS` is empty or contains only whitespace, use the **default vault path `~/vault`** and call it `VAULT_PATH`.
 
-```
-Usage: /wiki-init <vault-path>
-Example: /wiki-init ~/vault-personal
-```
-
-Otherwise, take the **first whitespace-separated token** as the target vault path. Call it `VAULT_PATH` in your reasoning. Do not split on quotes; assume the user passes a single path.
+Otherwise, take the **first whitespace-separated token** as the target vault path and call it `VAULT_PATH`. Do not split on quotes; assume the user passes a single path.
 
 ## Step 2: Expand and validate the path
 

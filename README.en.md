@@ -103,10 +103,11 @@ Remove the backup once you're satisfied: `rm -rf <your-vault>/.obsidian.bak`
 ### 1. Create a vault
 
 ```
-/wiki-init ~/vault-personal
+/wiki-init              # create at the default ~/vault
+/wiki-init ~/vault-personal   # or pass an explicit path
 ```
 
-This creates a vault skeleton at `~/vault-personal/` containing `WIKI.md`, `raw/`, `wiki/`, and `.obsidian/` (recommended preset). If Obsidian is not installed, `/wiki-init` prints install instructions at the end. Opening the vault in Obsidian afterwards is recommended.
+This creates a vault skeleton at the given path (default: `~/vault`) containing `WIKI.md`, `raw/`, `wiki/`, and `.obsidian/` (recommended preset). If Obsidian is not installed, `/wiki-init` prints install instructions at the end. Opening the vault in Obsidian afterwards is recommended.
 
 ### 2. Set the active vault
 
@@ -220,7 +221,7 @@ Roughly **160 seconds / 31 turns** per handover. With Claude Max plan auth (`api
 
 | Command | Purpose |
 |---|---|
-| `/wiki-init <vault-path>` | Scaffold a new vault |
+| `/wiki-init [<vault-path>]` | Scaffold a new vault (defaults to `~/vault`) |
 | `/wiki-ingest [<file-or-dir>] [--vault <path>]` | Compile raw sources into wiki pages (no argument = scan whole `raw/`) |
 | `/wiki-query <question> [--vault <path>] [--save]` | Synthesize an answer from the wiki |
 

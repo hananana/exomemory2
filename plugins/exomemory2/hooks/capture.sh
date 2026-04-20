@@ -83,6 +83,14 @@ body="$(
   ' "$transcript_path"
 )"
 
+# Skip sessions with no meaningful body (transcript only contains tool_use /
+# tool_result, or never got a text message). Otherwise we pollute raw/ with
+# frontmatter-only files and create noisy wiki source pages.
+if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+  echo "[exomemory2] skipping empty session: $session_id" >&2
+  exit 0
+fi
+
 # Compose the full Markdown output with YAML frontmatter.
 {
   printf -- '---\n'

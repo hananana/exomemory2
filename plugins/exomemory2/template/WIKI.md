@@ -128,6 +128,10 @@ last_updated: YYYY-MM-DD
 
 When Claude processes a `/wiki-ingest` call, for **each raw file**:
 
+### Step 0: Skip empty raw files
+
+If the raw file has no body content beyond YAML frontmatter (only whitespace after the closing `---`), the operation is `SKIP-empty`: append `## [YYYY-MM-DD] SKIP-empty | <slug>` to log.md and move on. Empty sessions must never produce a wiki source page — they are noise.
+
 ### Step 1: Compute identity
 
 1. Compute `source_id` from vault-relative path
@@ -210,7 +214,7 @@ Append-only. One line per operation:
 ## [YYYY-MM-DD] <op> | <slug>
 ```
 
-Where `<op>` ∈ `{CREATE, UPDATE, MERGE, SKIP}`. For slug collisions that triggered an error, do not log (the error is reported to the user only).
+Where `<op>` ∈ `{CREATE, UPDATE, MERGE, SKIP, SKIP-empty}`. For slug collisions that triggered an error, do not log (the error is reported to the user only).
 
 ## Notes on handovers
 
