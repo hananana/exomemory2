@@ -23,6 +23,21 @@
 
 手動の `/wiki-ingest` / `/wiki-query` コマンドも提供するが、これは補助的な位置づけ — 外部ソース（論文や Web クリップ）を `raw/` に投入して明示的に取り込んだり、蓄積された wiki に直接問い合わせたい時のためのもの。
 
+## Contents
+
+- [Requirements](#requirements)
+- [Install](#install)
+- [Obsidian (recommended frontend)](#obsidian-recommended-frontend)
+- [Quick start](#quick-start)
+- [Commands](#commands)
+- [Auto-capture](#auto-capture)
+- [Auto-ingest (v0.2+)](#auto-ingest-v02)
+- [Vault layout](#vault-layout)
+- [Design notes](#design-notes)
+- [Troubleshooting](#troubleshooting)
+- [Roadmap](#roadmap)
+- [License](#license)
+
 ## Requirements
 
 | 項目 | 用途 |

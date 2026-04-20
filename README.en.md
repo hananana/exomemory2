@@ -23,6 +23,20 @@ A Claude Code plugin that implements [Andrej Karpathy's LLM Wiki pattern](https:
 
 Manual `/wiki-ingest` / `/wiki-query` commands are also provided, but they're secondary — for when you want to explicitly ingest external sources (papers, web clippings) dropped into `raw/`, or query the accumulated wiki directly.
 
+## Contents
+
+- [Requirements](#requirements)
+- [Install](#install)
+- [Obsidian (recommended frontend)](#obsidian-recommended-frontend)
+- [Quick start](#quick-start)
+- [Commands](#commands)
+- [Auto-ingest (v0.2+)](#auto-ingest-v02)
+- [Vault layout](#vault-layout)
+- [Design notes](#design-notes)
+- [Roadmap](#roadmap)
+- [Migrating from exomemory v1](#migrating-from-exomemory-v1)
+- [License](#license)
+
 ## Requirements
 
 | Item | Purpose |
