@@ -10,7 +10,13 @@ Based on [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/4
 <vault>/
 ├── WIKI.md                  # This file (schema)
 ├── raw/                     # Immutable source documents (you drop files here)
-│   └── handovers/           # Auto-captured Claude conversations (via hooks)
+│   ├── handovers/           # Auto-captured Claude conversations (via hooks)
+│   ├── web/                 # Web clips (via /wiki-clip or PostToolUse[WebFetch])
+│   │   └── <slug>.md
+│   └── assets/              # Image pool for web clips (content-addressed)
+│       ├── <sha256>.png
+│       ├── <sha256>.jpg
+│       └── .trash/          # /wiki-gc logical-deletes orphans here
 └── wiki/                    # LLM-maintained knowledge layer
     ├── index.md             # Catalog of all pages
     ├── log.md               # Append-only operation log
@@ -25,6 +31,7 @@ Based on [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/4
 - `wiki/` is LLM-write territory — can be freely updated
 - All pages are Markdown with YAML frontmatter
 - Links use `[[slug]]` Obsidian-compatible format
+- `raw/assets/` is a flat content-addressed image pool shared across all `raw/` subdirectories. Filenames are `<sha256 of bytes>.<ext>` (Karpathy pattern)
 
 ## Page Naming (Slug Rules)
 
@@ -35,6 +42,15 @@ Based on [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/4
 - `slug` = `source_id` with `/` replaced by `--` and `.md` extension stripped
   - `papers/attention.md` → `slug = papers--attention`
 - Page location: `wiki/sources/<slug>.md`
+
+### Web clips (subtype of Sources)
+
+Files under `raw/web/` are web clips produced by `/wiki-clip` or auto-captured on `WebFetch`. They follow the same source naming rule, but the slug is derived from the URL:
+
+- From URL `https://gist.github.com/karpathy/442a6b...` → `source_id = web/gist-github-com--karpathy--442a6b.md`
+- Derivation: lowercase the host, replace `.` with `-` in host, POSIX-normalize path, replace `/` with `--`, drop query/fragment, Punycode for non-ASCII hosts
+- `slug = web--<host-normalized>--<path-normalized>` (same `/` → `--` rule)
+- Page location: `wiki/sources/web--<...>.md`
 
 ### Entities and Concepts
 
@@ -57,6 +73,27 @@ source_hash: sha256:<hash>
 last_updated: YYYY-MM-DD
 ---
 ```
+
+### Web clip page (subtype of Source)
+
+Web clips omit `source_hash` from frontmatter because `/wiki-ingest` recomputes it from the raw file at ingest time. Writing `source_hash` into frontmatter would change the raw bytes and force `UPDATE` on every ingest.
+
+```yaml
+---
+title: <readability-extracted title>
+type: source
+tags: [web-clip, ...]
+source_id: web/<slug>.md
+source_url: https://...
+captured_at: <ISO8601>
+captured_by: manual-clip | auto-webfetch | auto-browser
+last_updated: YYYY-MM-DD
+---
+```
+
+**Invariants** (critical for ingest stability):
+- Once written, the raw file is **never modified**. No `referenced_by`, no timestamp bumps. This keeps `source_hash` stable so re-ingest reliably hits `SKIP`.
+- Image references use **relative paths from the raw file**: `../assets/<sha256>.<ext>`. This works in both Obsidian and plain Markdown renderers.
 
 ### Entity page
 
@@ -226,3 +263,23 @@ Files under `raw/handovers/` are automatically captured Claude conversation logs
 - Filter out trivial chit-chat or repeated reasoning traces
 
 Since the capture overwrites the same file per session (no timestamps in filename), later compacts/exits in the same session update the same source. `source_hash` will differ, triggering `UPDATE` on re-ingest.
+
+If the handover contains a `## Clips Captured in This Session` section (emitted by `capture.sh` when `PostToolUse[WebFetch]` queued URLs during the session), the listed `[[web--<slug>]]` wikilinks become Connections in `wiki/sources/handovers--<id>.md` through the existing wikilink-extraction ingest logic. No special handling is required.
+
+## Notes on web clips
+
+Files under `raw/web/` are web pages clipped via `/wiki-clip` or auto-captured on `WebFetch` (see `.exomemory-config: AUTO_CLIP`). Treat them as ordinary sources:
+
+- `source_id` = `web/<slug>.md`
+- `slug` derivation: see "Web clips" under Page Naming
+- Body is readability-extracted Markdown; images live in `raw/assets/` referenced as `../assets/<sha256>.<ext>`
+
+**Session attribution (v0.3 one-way graph):**
+
+- `wiki/sources/handovers--<id>.md` records Connections to the web clips used in that session (via wikilinks in the handover's "Clips Captured" section)
+- The reverse direction — listing which sessions touched a given web clip — is **not persisted** in `wiki/sources/web--<slug>.md` during v0.3, because the current ingest workflow does not MERGE back-edges into source pages. It remains retrievable by `grep` over handover wiki pages, and a future release may introduce bidirectional source-page MERGE
+
+**Invariants for web-clip raw files:**
+
+- `raw/web/<slug>.md` is written **once** and never modified. Revisiting the same URL from a new session produces `SKIP` (hash match) — attribution is handled by the new handover's own Connections, not by rewriting the existing clip
+- `raw/assets/<sha256>.<ext>` is content-addressed. The same image bytes across different clips dedupe to one file. Never move, rename, or hand-edit these files; they are referenced by hash from multiple raw sources

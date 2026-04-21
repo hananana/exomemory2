@@ -21,7 +21,9 @@ A Claude Code plugin that implements [Andrej Karpathy's LLM Wiki pattern](https:
 
 **The focus is automation.** Every time a session ends, the conversation is saved to the vault's `raw/` directory, and once enough has accumulated, Claude is spawned in the background to compile the raw material into an interlinked markdown wiki. You don't have to do anything — the knowledge graph grows on its own as you keep using Claude.
 
-Manual `/wiki-ingest` / `/wiki-query` commands are also provided, but they're secondary — for when you want to explicitly ingest external sources (papers, web clippings) dropped into `raw/`, or query the accumulated wiki directly.
+Starting with v0.3, **web pages Claude reads via `WebFetch` also flow into the wiki automatically** (explicit clipping via `/wiki-clip` is also supported; authenticated pages go through `browser-use` to reuse your Chrome login session). Everything you and Claude read together gets captured.
+
+Manual `/wiki-ingest` / `/wiki-query` commands are also provided, but they're secondary — for when you want to explicitly ingest external sources (papers) dropped into `raw/`, or query the accumulated wiki directly.
 
 ## Contents
 
@@ -30,6 +32,7 @@ Manual `/wiki-ingest` / `/wiki-query` commands are also provided, but they're se
 - [Obsidian (recommended frontend)](#obsidian-recommended-frontend)
 - [Quick start](#quick-start)
 - [Commands](#commands)
+- [Web clipping (v0.3+)](#web-clipping-v03)
 - [Auto-ingest (v0.2+)](#auto-ingest-v02)
 - [Vault layout](#vault-layout)
 - [Design notes](#design-notes)
@@ -39,11 +42,14 @@ Manual `/wiki-ingest` / `/wiki-query` commands are also provided, but they're se
 
 ## Requirements
 
-| Item | Purpose |
-|---|---|
-| `jq` | Capture hook uses it to extract transcript JSON (required) |
-| `python3` | Used by `/wiki-init` for path expansion (ships on macOS / most Linux distros by default) |
-| [Obsidian](https://obsidian.md) | **Strongly recommended.** Technically optional — the vault is plain Markdown and works in any editor — but the UX Karpathy's original gist assumes (Graph View / Backlinks / Web Clipper / Dataview) only comes together in Obsidian. Skipping it means losing half of the LLM-wiki pattern |
+| Item | Purpose | Required? |
+|---|---|---|
+| `jq` | Capture hook uses it to extract transcript JSON | Required |
+| `python3` | Used by `/wiki-init` for path expansion (ships on macOS / most Linux distros by default) | Required |
+| [Obsidian](https://obsidian.md) | **Strongly recommended.** Technically optional — the vault is plain Markdown and works in any editor — but the UX Karpathy's original gist assumes (Graph View / Backlinks / Web Clipper / Dataview) only comes together in Obsidian. Skipping it means losing half of the LLM-wiki pattern | Recommended |
+| `readable` ([readability-cli](https://www.npmjs.com/package/readability-cli), `npm i -g readability-cli`) | `/wiki-clip` and auto-clip use it to extract article bodies from HTML | Required for v0.3 features |
+| [`pandoc`](https://pandoc.org) | `/wiki-clip` uses it for HTML→Markdown conversion | Required for v0.3 features |
+| [`browser-use`](https://github.com/browser-use/browser-use) | Fetches authenticated pages (Notion / Confluence / etc.) and the current tab via CDP | Required when clipping auth-walled pages |
 
 ## Install
 
@@ -157,6 +163,83 @@ Claude synthesizes an answer from the relevant pages with `[[wikilink]]` citatio
 | `/wiki-init [<vault-path>]` | Scaffold a new vault (defaults to `~/vault`) |
 | `/wiki-ingest [<file-or-dir>] [--vault <path>]` | Compile raw sources into wiki pages (no argument = scan whole `raw/`) |
 | `/wiki-query <question> [--vault <path>] [--save]` | Synthesize an answer from the wiki |
+| `/wiki-clip [<url>] [--browser] [--batch <queue>]` (v0.3+) | Clip a web page into `raw/web/` with images into `raw/assets/`. URL omitted ⇒ clip the current Chrome tab |
+| `/wiki-gc [--dry-run] [--purge-older-than <days>]` (v0.3+) | Move orphan images to `.trash/`; physically delete entries older than 90 days |
+
+## Web clipping (v0.3+)
+
+Expands the input side of the wiki from handovers alone (Claude conversation logs) to **web pages Claude reads**. Three channels feed `raw/web/`:
+
+| Channel | Trigger | Use case |
+|---|---|---|
+| **auto-webfetch** | Claude calls `WebFetch` | When you ask Claude to "read this article", the URL is auto-captured. A `PostToolUse[WebFetch]` hook queues the URL and SessionEnd runs batch clip |
+| **manual clip** | `/wiki-clip <url>` | Clip an explicit URL. Public URLs go through `curl + readable`; auth-walled domains (`notion.so` etc.) auto-switch to `browser-use` |
+| **current tab** | `/wiki-clip` (no args) | Clip the Chrome tab you're reading right now. Requires Chrome launched with `--remote-debugging-port=9222` |
+
+### Pipeline
+
+```
+Fetch HTML (curl or browser-use)
+  ↓
+readable extracts the article body (Readability.js)
+  ↓
+pandoc converts HTML → Markdown
+  ↓
+Download images (curl, fallback to page-context fetch via browser-use for auth walls)
+  ↓
+Save images content-addressed: raw/assets/<sha256>.<ext>
+  ↓
+Rewrite Markdown image refs to ../assets/<hash>.<ext>
+  ↓
+Write raw/web/<slug>.md (frontmatter is immutable after creation)
+```
+
+### Auth-walled domains
+
+These automatically route through the browser-use path (reusing your Chrome profile's login session):
+
+```
+notion.so, notion.site, atlassian.net, atlassian.com,
+slack.com, linear.app, docs.google.com, drive.google.com
+```
+
+Pass `--browser` to force browser-use for any URL.
+
+### Session attribution (handover bridge)
+
+Auto-captured clips get listed in the session's handover as a "Clips Captured" section:
+
+```markdown
+## Clips Captured in This Session
+
+- [[web--gist-github-com--karpathy--442a6b...]] — https://gist.github.com/karpathy/442a6bf...
+```
+
+When the next `/wiki-ingest` runs, that wikilink creates a **handover → web-clip Connection in `wiki/sources/handovers--xxx.md` automatically**, so you can trace which session read which article through the wiki graph.
+
+### Image pool & `/wiki-gc`
+
+Images are content-addressed (`<sha256>.<ext>`), so the same image reused across articles stores only once. Deleting a clip leaves its images in the pool — run `/wiki-gc` periodically to sweep orphans:
+
+```
+/wiki-gc --dry-run                    # report counts and sample only
+/wiki-gc                              # move orphans to raw/assets/.trash/<today>/
+/wiki-gc --purge-older-than 90        # physically delete .trash/ entries older than 90 days (default)
+```
+
+Logical delete first, so recovery within 90 days is always possible.
+
+### Configuration
+
+`<vault>/.exomemory-config` keys added in v0.3 (INT-only, same strict parser as AUTO_INGEST):
+
+```
+# Auto-capture of WebFetch URLs (1 = enabled, 0 = disabled)
+AUTO_CLIP=1
+
+# Cap per-session auto-capture queue to prevent runaway
+AUTO_CLIP_MAX_PER_SESSION=20
+```
 
 ## Auto-ingest (v0.2+)
 
@@ -203,7 +286,9 @@ AUTO_INGEST_INTERVAL_SEC=1800   # min seconds between runs
 
 ### Scope
 
-Only `raw/handovers/*.md` is ingested automatically. Other `raw/` subdirectories (`raw/papers/`, `raw/web/`, ...) require manual `/wiki-ingest raw/papers/` to avoid surprise LLM runs.
+- **handovers + auto-clipped web pages**: `raw/handovers/*.md` drives the dirty-count gate, and from v0.3 onward the URLs queued by `PostToolUse[WebFetch]` are batch-clipped at SessionEnd and then ingested in the same flow
+- Manually populated sources like `raw/papers/` still require explicit `/wiki-ingest raw/papers/` — they don't count toward the dirty threshold, so they won't trigger surprise LLM runs
+- Batch clip and ingest have **independent gates**: clip runs whenever the queue has URLs; ingest runs on the usual dirty ≥ threshold && interval elapsed gate
 
 ### State files (gitignored)
 
@@ -234,7 +319,9 @@ Roughly **160 seconds / 31 turns** per handover. With Claude Max plan auth (`api
 ├── WIKI.md                 # Schema and workflow (authoritative for Claude)
 ├── .obsidian/              # Obsidian preset (graph color groups, core plugins enabled)
 ├── raw/                    # Immutable source documents (user drops files here)
-│   └── handovers/          # Auto-captured conversations
+│   ├── handovers/          # Auto-captured conversations
+│   ├── web/                # Web clips (v0.3+, via /wiki-clip and auto-webfetch)
+│   └── assets/             # Image pool (v0.3+, content-addressed <sha256>.<ext>)
 └── wiki/                   # LLM-maintained knowledge layer
     ├── index.md
     ├── log.md
@@ -255,10 +342,11 @@ Every page is plain Markdown with YAML frontmatter and `[[wikilink]]` cross-refe
 
 ## Roadmap
 
-- v0.2: Auto-ingest on `SessionStart` (opt-in via env flag)
-- v0.3: Privacy filter at capture time (block sensitive topics)
-- v0.4: Graph-aware lint (orphans, broken links, contradictions)
-- Later: Obsidian Bases/Canvas templates, HTML publishing via Quartz
+- [x] v0.2: Auto-ingest machinery (dirty-count gate + background spawn)
+- [x] v0.3: Input-layer expansion — `/wiki-clip`, `PostToolUse[WebFetch]` auto-capture, `browser-use` for auth walls, `/wiki-gc` for orphan images
+- [ ] v0.4: Dataview support (bidirectional MERGE across `wiki/sources/`, auto-generated index)
+- [ ] v0.5: Privacy filter at capture time (block sensitive topics)
+- [ ] Later: graph-aware lint (orphans, broken links, contradictions), Obsidian Bases/Canvas templates, HTML publishing via Quartz
 
 ## Migrating from exomemory v1
 

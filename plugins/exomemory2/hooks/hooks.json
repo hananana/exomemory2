@@ -1,5 +1,5 @@
 {
-  "description": "exomemory2 — Auto-capture conversation transcripts to the vault on PreCompact and SessionEnd; auto-ingest in the background; report wiki freshness on SessionStart",
+  "description": "exomemory2 — Auto-capture conversation transcripts and WebFetch URLs to the vault; auto-ingest in the background; report wiki freshness on SessionStart",
   "hooks": {
     "PreCompact": [
       {
@@ -33,6 +33,18 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/post-webfetch.sh\"",
+            "timeout": 10
           }
         ]
       }

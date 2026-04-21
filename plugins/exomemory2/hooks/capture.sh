@@ -12,6 +12,46 @@
 
 set -eo pipefail
 
+# ---------------------------------------------------------------------------
+# Helpers referenced during handover composition below must be defined up
+# front (bash resolves function names at call time, but only functions that
+# have been parsed so far).
+# ---------------------------------------------------------------------------
+
+# Derive the web-clip slug from a URL. MUST stay in sync with the URL
+# normalization in commands/wiki-clip.md (Step 6). If you change one, change
+# the other — ingest will create duplicate wiki pages otherwise.
+url_to_slug() {
+  local url="$1"
+  local u="${url%%#*}"
+  u="${u%%\?*}"
+  local rest="${u#*://}"
+  local host="${rest%%/*}"
+  local path="/${rest#*/}"
+  [ "$host" = "$rest" ] && path=""
+  local host_safe
+  host_safe=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]' | tr '.' '-')
+  local path_trim="${path#/}"
+  path_trim="${path_trim%/}"
+  local path_safe
+  path_safe=$(printf '%s' "$path_trim" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's|/|--|g; s|[^a-z0-9._-]|-|g' \
+    | sed -E 's|^-+||; s|-+$||')
+  local base
+  if [ -n "$path_safe" ]; then
+    base="${host_safe}--${path_safe}"
+  else
+    base="$host_safe"
+  fi
+  if [ ${#base} -gt 120 ]; then
+    local h
+    h=$(printf '%s' "$base" | shasum -a 256 | cut -c1-8)
+    base="${base:0:110}-${h}"
+  fi
+  printf '%s' "web--${base}"
+}
+
 # Resolve vault: EXOMEMORY_VAULT preferred, CLAUDE_MEMORY_VAULT for backward
 # compatibility (deprecated, will be removed in v0.3).
 VAULT="${EXOMEMORY_VAULT:-${CLAUDE_MEMORY_VAULT:-}}"
@@ -102,6 +142,25 @@ fi
   printf '%s\n' "$body"
 } > "$out_md"
 
+# Append "Clips Captured" section if PostToolUse[WebFetch] queued URLs for
+# this session. Wikilinks are computed from URLs so that the handover's own
+# text creates the handover → web-clip Connection during /wiki-ingest, even
+# if the clip raw file hasn't been materialized yet by batch-clip.
+QUEUE_FILE="$VAULT/.clip-queue/$session_id.txt"
+if [ -s "$QUEUE_FILE" ]; then
+  queued_urls=$(awk 'NF && !seen[$0]++' "$QUEUE_FILE")
+  if [ -n "$queued_urls" ]; then
+    {
+      printf '\n## Clips Captured in This Session\n\n'
+      while IFS= read -r u; do
+        [ -z "$u" ] && continue
+        slug=$(url_to_slug "$u")
+        printf -- '- [[%s]] — %s\n' "$slug" "$u"
+      done <<< "$queued_urls"
+    } >> "$out_md"
+  fi
+fi
+
 echo "[exomemory2] captured: $out_md" >&2
 
 # ===========================================================================
@@ -119,6 +178,7 @@ load_config() {
   AUTO_INGEST=1
   AUTO_INGEST_THRESHOLD=3
   AUTO_INGEST_INTERVAL_SEC=1800
+  AUTO_CLIP=1
   [ -f "$config" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
@@ -131,6 +191,7 @@ load_config() {
         AUTO_INGEST) AUTO_INGEST="$val" ;;
         AUTO_INGEST_THRESHOLD) AUTO_INGEST_THRESHOLD="$val" ;;
         AUTO_INGEST_INTERVAL_SEC) AUTO_INGEST_INTERVAL_SEC="$val" ;;
+        AUTO_CLIP) AUTO_CLIP="$val" ;;
       esac
     fi
   done < "$config"
@@ -210,28 +271,43 @@ acquire_lock() {
 # Load per-vault config (defaults applied if file is missing).
 load_config "$VAULT/.exomemory-config"
 
-if [ "$AUTO_INGEST" != "1" ]; then
-  exit 0
+# Two independent gates:
+#   has_queue     — clips pending in $QUEUE_FILE (bypasses the dirty/interval gate)
+#   should_ingest — the existing dirty+interval gate for /wiki-ingest
+# Either gate firing triggers the background spawn; neither firing exits 0.
+has_queue=0
+if [ "$AUTO_CLIP" = "1" ] && [ -s "$QUEUE_FILE" ]; then
+  has_queue=1
 fi
 
-DIRTY=$(count_dirty_handovers "$VAULT")
-if [ "$DIRTY" -lt "$AUTO_INGEST_THRESHOLD" ]; then
-  echo "[exomemory2] auto-ingest: $DIRTY dirty < threshold $AUTO_INGEST_THRESHOLD, skipping" >&2
-  exit 0
-fi
-
-if [ -f "$VAULT/.last-ingest" ]; then
-  LAST=$(cat "$VAULT/.last-ingest" 2>/dev/null)
-  NOW=$(date +%s)
-  if [ -n "$LAST" ] && [ $((NOW - LAST)) -lt "$AUTO_INGEST_INTERVAL_SEC" ]; then
-    echo "[exomemory2] auto-ingest: last run $((NOW - LAST))s ago < interval $AUTO_INGEST_INTERVAL_SEC, skipping" >&2
-    exit 0
+should_ingest=0
+if [ "$AUTO_INGEST" = "1" ]; then
+  DIRTY=$(count_dirty_handovers "$VAULT")
+  if [ "$DIRTY" -ge "$AUTO_INGEST_THRESHOLD" ]; then
+    ingest_interval_ok=1
+    if [ -f "$VAULT/.last-ingest" ]; then
+      LAST=$(cat "$VAULT/.last-ingest" 2>/dev/null)
+      NOW=$(date +%s)
+      if [ -n "$LAST" ] && [ $((NOW - LAST)) -lt "$AUTO_INGEST_INTERVAL_SEC" ]; then
+        ingest_interval_ok=0
+        echo "[exomemory2] auto-ingest: last run $((NOW - LAST))s ago < interval $AUTO_INGEST_INTERVAL_SEC, skipping ingest" >&2
+      fi
+    fi
+    if [ "$ingest_interval_ok" = "1" ]; then
+      should_ingest=1
+    fi
+  else
+    echo "[exomemory2] auto-ingest: $DIRTY dirty < threshold $AUTO_INGEST_THRESHOLD, skipping ingest" >&2
   fi
+fi
+
+if [ "$has_queue" = "0" ] && [ "$should_ingest" = "0" ]; then
+  exit 0
 fi
 
 # Verify `claude` is available before spawning.
 if ! command -v claude >/dev/null 2>&1; then
-  echo "[exomemory2] auto-ingest: 'claude' CLI not found in PATH, skipping" >&2
+  echo "[exomemory2] 'claude' CLI not found in PATH, skipping" >&2
   exit 0
 fi
 
@@ -246,17 +322,42 @@ LOG="$VAULT/.ingest.log"
   if ! acquire_lock "$LOCK" "$MY_PID"; then
     exit 0
   fi
-  trap 'rm -f "$LOCK"; date +%s > "$VAULT/.last-ingest"' EXIT
-  printf '%s\n' '{"type":"user","message":{"role":"user","content":"/exomemory2:wiki-ingest raw/handovers/"}}' | \
-    EXOMEMORY_VAULT="$VAULT" nohup claude -p \
-      --input-format stream-json \
-      --output-format stream-json \
-      --verbose \
-      --no-session-persistence \
-      --permission-mode bypassPermissions \
-      >>"$LOG" 2>&1
+  # Cleanup: always remove lock. Bump .last-ingest only if ingest actually
+  # ran. Remove queue unconditionally (a failed batch leaves errors in
+  # .ingest.log; retrying the same queue on the next SessionEnd is riskier
+  # than forcing the user to re-invoke /wiki-clip manually).
+  trap '
+    rm -f "$LOCK"
+    [ "'"$should_ingest"'" = "1" ] && date +%s > "'"$VAULT"'/.last-ingest"
+    [ -f "'"$QUEUE_FILE"'" ] && rm -f "'"$QUEUE_FILE"'"
+  ' EXIT
+
+  # Batch clip first (if any). Runs even when the ingest gate is closed, so
+  # short sessions still get their pending clips materialized into raw/web/.
+  if [ "$has_queue" = "1" ]; then
+    printf '%s\n' "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"/exomemory2:wiki-clip --batch $QUEUE_FILE --captured-by auto-webfetch\"}}" | \
+      EXOMEMORY_VAULT="$VAULT" nohup claude -p \
+        --input-format stream-json \
+        --output-format stream-json \
+        --verbose \
+        --no-session-persistence \
+        --permission-mode bypassPermissions \
+        >>"$LOG" 2>&1
+  fi
+
+  # Ingest pass (only when the dirty/interval gate is open).
+  if [ "$should_ingest" = "1" ]; then
+    printf '%s\n' '{"type":"user","message":{"role":"user","content":"/exomemory2:wiki-ingest"}}' | \
+      EXOMEMORY_VAULT="$VAULT" nohup claude -p \
+        --input-format stream-json \
+        --output-format stream-json \
+        --verbose \
+        --no-session-persistence \
+        --permission-mode bypassPermissions \
+        >>"$LOG" 2>&1
+  fi
 ) </dev/null >/dev/null 2>&1 &
 disown
 
-echo "[exomemory2] auto-ingest: spawned background ingest ($DIRTY dirty handover(s))" >&2
+echo "[exomemory2] spawned background: clip=$has_queue ingest=$should_ingest (dirty=${DIRTY:-0})" >&2
 exit 0
