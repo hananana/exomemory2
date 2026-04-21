@@ -124,16 +124,23 @@ For **CREATE** or **UPDATE**:
 
 1. Read the raw file
 2. Extract: title, summary (2-4 paragraphs), key claims, mentioned entities, mentioned concepts, any contradictions with existing wiki content
-3. Write `<VAULT>/wiki/sources/<slug>.md` using the Source Page Format from WIKI.md (frontmatter + Summary / Key Claims / Connections / Contradictions)
-4. For each mentioned entity:
+3. Compute the following derived frontmatter fields (v0.4+, per WIKI.md Source page spec):
+   - `source_type` — from `source_id` prefix: `handovers/*` → `handover`, `web/*` → `web-clip`, else → `manual`
+   - `word_count` — whitespace-split tokens in the raw body (if the raw file has YAML frontmatter, strip it first)
+   - `reading_time_min` — `ceil(word_count / 200)`
+   - If `source_type == handover`: `session_id` — the raw filename without `.md` extension (matches the Claude session UUID)
+   - If `source_type == web-clip`: read the raw file's frontmatter and copy `source_url`, `captured_at`, `captured_by` into the wiki page's frontmatter; compute `domain` as the lowercased host part of `source_url`. If `captured_by` is missing from the raw (pre-v0.3 clip), write `captured_by: unknown`
+4. Write `<VAULT>/wiki/sources/<slug>.md` using the Source Page Format from WIKI.md (frontmatter with the above derived fields + the v0.3 fields `title`, `type: source`, `tags`, `source_id`, `source_hash`, `last_updated`; then body = Summary / Key Claims / Connections / Contradictions).
+   - On **UPDATE**: merge frontmatter — overwrite the derived fields above plus `title`, `tags`, `source_hash`, `last_updated`; preserve any frontmatter keys the user may have added by hand. Do not drop unknown keys.
+5. For each mentioned entity:
    - slug = kebab-case of canonical name
    - If `<VAULT>/wiki/entities/<slug>.md` does not exist → CREATE (About + Connections back to this source)
    - If exists → MERGE (append new Connection line; new About info appended as paragraph, do NOT overwrite)
-5. For each mentioned concept: same pattern in `<VAULT>/wiki/concepts/`
-6. Update `<VAULT>/wiki/index.md`:
+6. For each mentioned concept: same pattern in `<VAULT>/wiki/concepts/`
+7. Update `<VAULT>/wiki/index.md`:
    - Under the relevant section (Sources / Entities / Concepts), append `- [[<slug>]] — <title>` for each newly-created page. No duplicates.
-7. Update `<VAULT>/wiki/overview.md`: append or lightly revise. **Do not rewrite from scratch**.
-8. Append to `<VAULT>/wiki/log.md`: `## [<today>] CREATE | <slug>` (or `UPDATE` / `MERGE`). Get today's date:
+8. Update `<VAULT>/wiki/overview.md`: append or lightly revise. **Do not rewrite from scratch**.
+9. Append to `<VAULT>/wiki/log.md`: `## [<today>] CREATE | <slug>` (or `UPDATE` / `MERGE`). Get today's date:
    ```bash
    date +%Y-%m-%d
    ```

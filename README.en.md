@@ -23,6 +23,8 @@ A Claude Code plugin that implements [Andrej Karpathy's LLM Wiki pattern](https:
 
 Starting with v0.3, **web pages Claude reads via `WebFetch` also flow into the wiki automatically** (explicit clipping via `/wiki-clip` is also supported; authenticated pages go through `browser-use` to reuse your Chrome login session). Everything you and Claude read together gets captured.
 
+As of v0.4, the accumulated wiki is queryable via **Obsidian Dataview**. Source pages are auto-tagged with `source_type` / `word_count` / `reading_time_min` / `domain` frontmatter, and `wiki/dashboards/` ships 8 pre-built views (recent sources, clips by domain, popular entities, orphan concepts, etc.). Existing vaults can be upgraded in place with `/wiki-migrate-dataview`.
+
 Manual `/wiki-ingest` / `/wiki-query` commands are also provided, but they're secondary — for when you want to explicitly ingest external sources (papers) dropped into `raw/`, or query the accumulated wiki directly.
 
 ## Contents
@@ -33,6 +35,7 @@ Manual `/wiki-ingest` / `/wiki-query` commands are also provided, but they're se
 - [Quick start](#quick-start)
 - [Commands](#commands)
 - [Web clipping (v0.3+)](#web-clipping-v03)
+- [Dataview dashboards (v0.4+)](#dataview-dashboards-v04)
 - [Auto-ingest (v0.2+)](#auto-ingest-v02)
 - [Vault layout](#vault-layout)
 - [Design notes](#design-notes)
@@ -85,8 +88,8 @@ Every vault created by `/wiki-init` includes an `.obsidian/` directory preconfig
 
 ### Recommended community plugins (install separately in Obsidian)
 
-- **Dataview** — SQL-like queries over YAML frontmatter (e.g. list all `type: entity` pages)
-- **Obsidian Web Clipper** — browser extension; configure it to save web articles under `<vault>/raw/web/`, then run `/wiki-ingest raw/web/` to fold them into the wiki
+- **Dataview** — **effectively required from v0.4 onward.** The 8 dashboards shipped under `wiki/dashboards/` are inert unless Dataview is enabled. See [Dataview dashboards](#dataview-dashboards-v04)
+- **Obsidian Web Clipper** — browser extension; configure it to save web articles under `<vault>/raw/web/`, then run `/wiki-ingest raw/web/` to fold them into the wiki (largely superseded by `/wiki-clip` from v0.3, but still useful as a fallback)
 
 ### Applying the `.obsidian/` preset to an existing vault
 
@@ -165,6 +168,7 @@ Claude synthesizes an answer from the relevant pages with `[[wikilink]]` citatio
 | `/wiki-query <question> [--vault <path>] [--save]` | Synthesize an answer from the wiki |
 | `/wiki-clip [<url>] [--browser] [--batch <queue>]` (v0.3+) | Clip a web page into `raw/web/` with images into `raw/assets/`. URL omitted ⇒ clip the current Chrome tab |
 | `/wiki-gc [--dry-run] [--purge-older-than <days>]` (v0.3+) | Move orphan images to `.trash/`; physically delete entries older than 90 days |
+| `/wiki-migrate-dataview [--dry-run] [--skip-schema-update]` (v0.4+) | One-shot retrofit of Dataview-queryable frontmatter onto pre-v0.4 vaults (adds `source_type`, `word_count`, `domain`, etc., swaps `WIKI.md` for the v0.4 template, installs `wiki/dashboards/`) |
 
 ## Web clipping (v0.3+)
 
@@ -240,6 +244,61 @@ AUTO_CLIP=1
 # Cap per-session auto-capture queue to prevent runaway
 AUTO_CLIP_MAX_PER_SESSION=20
 ```
+
+## Dataview dashboards (v0.4+)
+
+Every source page gets **Dataview-queryable frontmatter**, and `wiki/dashboards/` ships 8 pre-built views. Enable the Dataview community plugin in Obsidian and they light up out of the box.
+
+### Added frontmatter fields
+
+Common to all source pages:
+
+| Field | Meaning |
+|-------|---------|
+| `source_type` | `handover` / `web-clip` / `manual` (derived from `source_id` prefix) |
+| `word_count` | Whitespace tokens in the raw body |
+| `reading_time_min` | `ceil(word_count / 200)` |
+
+Handover-only: `session_id` (the Claude session UUID).
+Web-clip-only: `source_url`, `domain`, `captured_at`, `captured_by` (forwarded from the raw frontmatter).
+
+Entity and concept pages are **unchanged** — Dataview's native fields (`length(file.inlinks)`, `file.ctime`, `file.mtime`) cover the same queries without needing retrofit frontmatter.
+
+### Shipped dashboards (`wiki/dashboards/`)
+
+| File | Purpose |
+|------|---------|
+| `recent.md` | Source pages updated in the last 30 days |
+| `by-source-type.md` | Counts grouped by `source_type` |
+| `by-domain.md` | Web clips grouped by `domain` |
+| `handovers-timeline.md` | Claude sessions, newest first, with length proxies |
+| `popular-entities.md` | Entities ranked by inbound wikilink count |
+| `orphan-concepts.md` | Concepts with ≤ 1 inbound link (pruning candidates) |
+| `long-reads.md` | Sources with `reading_time_min >= 10` |
+| `README.md` | Dashboard index and frontmatter reference |
+
+### Upgrading an existing vault
+
+Vaults created before v0.4 can be upgraded in place with `/wiki-migrate-dataview`:
+
+```
+/wiki-migrate-dataview --dry-run     # Preview changes without writing
+/wiki-migrate-dataview               # Actually retrofit
+```
+
+What it does:
+
+1. Adds derived frontmatter fields to every `wiki/sources/*.md` (body untouched, unknown keys preserved)
+2. Replaces `WIKI.md` with the v0.4 template when the line-1 schema marker is absent or older (keeps `WIKI.md.bak`)
+3. Copies `wiki/dashboards/` if missing (never overwrites existing dashboards)
+
+**Idempotent**: re-running produces zero diff (derived fields are pure functions). Re-running after a bugfix release naturally re-aligns every page.
+
+Pass `--skip-schema-update` to keep a hand-customized `WIKI.md` and `wiki/dashboards/` intact — page-level retrofit still runs.
+
+### Enabling Dataview in Obsidian
+
+Settings → Community plugins → Browse → search "Dataview" → Install + Enable. DataviewJS is not required (all shipped dashboards are plain DQL).
 
 ## Auto-ingest (v0.2+)
 
@@ -328,7 +387,8 @@ Roughly **160 seconds / 31 turns** per handover. With Claude Max plan auth (`api
     ├── overview.md
     ├── sources/            # One page per raw source
     ├── entities/           # People, organizations, projects, products
-    └── concepts/           # Ideas, frameworks, methods, theories
+    ├── concepts/           # Ideas, frameworks, methods, theories
+    └── dashboards/         # Obsidian Dataview views (v0.4+)
 ```
 
 Every page is plain Markdown with YAML frontmatter and `[[wikilink]]` cross-references. Works with Obsidian, VS Code, or any Markdown viewer. If you don't use Obsidian, `.obsidian/` is harmless — ignore or delete it.
@@ -344,8 +404,9 @@ Every page is plain Markdown with YAML frontmatter and `[[wikilink]]` cross-refe
 
 - [x] v0.2: Auto-ingest machinery (dirty-count gate + background spawn)
 - [x] v0.3: Input-layer expansion — `/wiki-clip`, `PostToolUse[WebFetch]` auto-capture, `browser-use` for auth walls, `/wiki-gc` for orphan images
-- [ ] v0.4: Dataview support (bidirectional MERGE across `wiki/sources/`, auto-generated index)
+- [x] v0.4: Dataview support — auto-populated `source_type` / `word_count` / `domain` frontmatter, 8 shipped dashboards under `wiki/dashboards/`, `/wiki-migrate-dataview` for retrofitting existing vaults
 - [ ] v0.5: Privacy filter at capture time (block sensitive topics)
+- [ ] v0.6: Bidirectional MERGE across `wiki/sources/` (e.g., when a web clip is reused from a new session, write the back-edge onto the web clip page too)
 - [ ] Later: graph-aware lint (orphans, broken links, contradictions), Obsidian Bases/Canvas templates, HTML publishing via Quartz
 
 ## Migrating from exomemory v1
