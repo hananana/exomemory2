@@ -422,8 +422,7 @@ Every page is plain Markdown with YAML frontmatter and `[[wikilink]]` cross-refe
 - [x] v0.4: Dataview support — auto-populated `source_type` / `word_count` / `domain` frontmatter, 8 shipped dashboards under `wiki/dashboards/`, `/wiki-migrate` for retrofitting existing vaults
 - [x] v0.5: GitHub-style activity heatmap on `index.md` (Contribution Graph plugin; no DataviewJS) + `/wiki-migrate-dataview` renamed to `/wiki-migrate` (breaking change)
 - [x] v0.6: Handover calendar (monthly view) on `index.md` via the built-in Dataview `CALENDAR` query — no extra plugin. `/wiki-migrate`'s index-section-insert logic is now driven by a `SECTIONS` list for easy extension.
-- [ ] v0.7: Privacy filter at capture time (block sensitive topics), bidirectional MERGE across `wiki/sources/` (e.g., when a web clip is reused from a new session, write the back-edge onto the web clip page too)
-- [ ] Later: graph-aware lint (orphans, broken links, contradictions), Obsidian Bases/Canvas templates, HTML publishing via Quartz
+- [ ] Later: pipeline to publish the vault as a static HTML site (e.g. via Quartz)
 
 ## Migrating from exomemory v1
 

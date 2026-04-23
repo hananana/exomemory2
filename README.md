@@ -541,8 +541,7 @@ rm -rf ~/.claude/plugins/cache/exomemory2/
 - [x] v0.4: Dataview 対応 — source page に `source_type` / `word_count` / `domain` 等の frontmatter を自動付与、`wiki/dashboards/` に 8 種のビュー同梱、`/wiki-migrate` で既存 vault を retrofit
 - [x] v0.5: `index.md` に GitHub 草風のアクティビティヒートマップ同梱（Contribution Graph プラグイン連携、DataviewJS 不要）+ `/wiki-migrate-dataview` を `/wiki-migrate` に汎用化リネーム
 - [x] v0.6: `index.md` に Handover calendar（月ビュー）追加（Dataview 標準 `CALENDAR` クエリ、追加プラグインなし）。`/wiki-migrate` の index セクション挿入ロジックを SECTIONS リスト駆動に一般化
-- [ ] v0.7: capture 時のプライバシーフィルタ（機密トピック除外）、source page 間 MERGE（例: 同じ web clip が複数セッションから参照されたとき、どの handover が触ったかを web clip 側にも記録する bidirectional graph）
-- [ ] 将来: graph-aware lint（孤立ページ、リンク切れ、矛盾検出）、Obsidian Bases / Canvas テンプレート、Quartz 経由の HTML 公開
+- [ ] 将来: Quartz などを使って vault を静的 HTML サイトとして publish する pipeline
 
 ## License
 
