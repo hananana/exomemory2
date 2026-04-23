@@ -92,8 +92,8 @@ Every vault created by `/wiki-init` includes an `.obsidian/` directory preconfig
 
 ### Recommended community plugins (install separately in Obsidian)
 
-- **Dataview** — **effectively required from v0.4 onward.** The 8 dashboards shipped under `wiki/dashboards/` are inert unless Dataview is enabled. See [Dataview dashboards](#dataview-dashboards-v04)
-- **Obsidian Web Clipper** — browser extension; configure it to save web articles under `<vault>/raw/web/`, then run `/wiki-ingest raw/web/` to fold them into the wiki (largely superseded by `/wiki-clip` from v0.3, but still useful as a fallback)
+- **Dataview** — **effectively required from v0.4 onward.** The 8 dashboards shipped under `wiki/dashboards/` and the v0.6 Handover calendar on `index.md` all rely on Dataview. Without it, the code blocks just show as source. See [Dataview dashboards](#dataview-dashboards-v04). JavaScript Queries (DataviewJS) can stay OFF — everything works with plain DQL
+- **Contribution Graph** — **for the v0.5 Activity heatmap on `index.md`**. Obsidian → Settings → Community plugins → search "Contribution Graph". If not installed, the heatmap code block at the top of `index.md` just renders as source; nothing else breaks (the v0.6 Handover calendar is a pure Dataview query and does not depend on this plugin)
 
 ### Applying the `.obsidian/` preset to an existing vault
 

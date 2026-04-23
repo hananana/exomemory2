@@ -95,8 +95,8 @@ Obsidian 起動 → "Open folder as vault" → `/wiki-init` で作成した vaul
 
 Obsidian 側で別途インストールが必要（本プラグインの管轄外）:
 
-- **Dataview** — **v0.4 以降は事実上必須**。`wiki/dashboards/` の 8 種のビューは Dataview が enable されていないとただのコードブロックに見える。詳細は [Dataview dashboards](#dataview-dashboards-v04) 参照
-- **Obsidian Web Clipper** — ブラウザ拡張。web 記事を vault の `raw/web/` 配下に保存するよう設定すれば、後で `/wiki-ingest raw/web/` で一括取り込み可能（v0.3 以降は exomemory2 側の `/wiki-clip` がほぼ同等の機能を提供するので、こちらは補助手段）
+- **Dataview** — **v0.4 以降は事実上必須**。`wiki/dashboards/` の 8 種のビューと v0.6 の index の Handover calendar が Dataview 前提。enable されていないとただのコードブロックに見える。詳細は [Dataview dashboards](#dataview-dashboards-v04) 参照。JavaScript Queries (DataviewJS) は OFF のままで全機能が動く
+- **Contribution Graph** — **v0.5 の index ヒートマップ用**。Obsidian → Settings → Community plugins → search "Contribution Graph"。未インストールなら index.md 冒頭の heatmap コードブロックがソース表示されるだけで他機能には影響なし（v0.6 の Handover calendar は Dataview 標準機能なのでこのプラグインには依存しない）
 
 ## Quick start
 
