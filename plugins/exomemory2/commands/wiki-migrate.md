@@ -1,14 +1,19 @@
 ---
-description: Retrofit Dataview-queryable derived frontmatter fields onto existing wiki/sources pages (v0.4 migration)
-argument-hint: "[--dry-run] [--skip-schema-update] [--vault <path>]"
+description: Retrofit the vault to the current schema (derived frontmatter, dashboards, index heatmap)
+argument-hint: "[--dry-run] [--skip-schema-update] [--force] [--vault <path>]"
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
-# /wiki-migrate-dataview
+# /wiki-migrate
 
-Bring a vault created under v0.3 or earlier up to the v0.4 schema. For every `wiki/sources/*.md`, recompute the derived frontmatter fields (`source_type`, `word_count`, `reading_time_min`, and for handover/web-clip subtypes their specific fields). Also replaces the vault's `WIKI.md` with the v0.4 template when the line-1 schema marker is absent or points at an older version, and copies `wiki/dashboards/` if missing.
+Bring a vault up to the current exomemory2 schema. This generalizes the prior `/wiki-migrate-dataview` command (v0.4) by also handling v0.5 additions. The command performs, in order:
 
-This command is **idempotent**: derived fields are pure functions of the raw file and `source_id`, so re-running on an already-v0.4 vault produces zero diff. A bugfix to the field-computation logic is naturally propagated by simply re-running the command.
+1. (v0.4) For every `wiki/sources/*.md`, recompute derived frontmatter fields (`source_type`, `word_count`, `reading_time_min`, and handover/web-clip specific fields)
+2. (v0.4) Replace the vault's `WIKI.md` with the current template when the line-1 schema marker is absent or points at an older version
+3. (v0.4) Copy `wiki/dashboards/` files that are missing in the vault
+4. (v0.5) Insert an `## Activity heatmap` section into `wiki/index.md` if missing — see Step 10 for the decision flow
+
+This command is **idempotent**: derived fields are pure functions of the raw file and `source_id`, and the heatmap insert is gated by section presence, so re-running on a fully-migrated vault produces zero diff.
 
 ## Arguments
 
@@ -22,14 +27,15 @@ Tokenize `$ARGUMENTS` and set the following shell variables used by later steps:
 
 - `DRY_RUN=1` if `--dry-run` is present, else `0`
 - `SKIP_SCHEMA_UPDATE=1` if `--skip-schema-update` is present, else `0`
+- `FORCE=1` if `--force` is present, else `0` (v0.5+: used by Step 10 to prepend the heatmap into a customized `index.md`)
 - `EXPLICIT_VAULT=<path>` if `--vault <path>` is supplied, else unset
 
-Export `DRY_RUN` and `SKIP_SCHEMA_UPDATE` so embedded `python3` and sub-blocks can read them.
+Export `DRY_RUN`, `SKIP_SCHEMA_UPDATE`, and `FORCE` so embedded `python3` and sub-blocks can read them.
 
 Any unrecognized token is an error; reply with usage and stop:
 
 ```
-Usage: /wiki-migrate-dataview [--dry-run] [--skip-schema-update] [--vault <path>]
+Usage: /wiki-migrate [--dry-run] [--skip-schema-update] [--force] [--vault <path>]
 ```
 
 ## Step 2: Resolve the vault
@@ -56,7 +62,7 @@ while [ -f "$LOCK" ]; do
     break
   fi
   if [ "$waited" -ge "$WAIT_TIMEOUT" ]; then
-    echo "[wiki-migrate-dataview] auto-ingest still running after ${WAIT_TIMEOUT}s, aborting" >&2
+    echo "[wiki-migrate] auto-ingest still running after ${WAIT_TIMEOUT}s, aborting" >&2
     exit 1
   fi
   sleep 2
@@ -73,7 +79,7 @@ done
 # working directory, so CLAUDE_PLUGIN_ROOT is set by the plugin runtime.
 TEMPLATE_DIR="${CLAUDE_PLUGIN_ROOT}/template"
 if [ ! -f "$TEMPLATE_DIR/WIKI.md" ]; then
-  echo "[wiki-migrate-dataview] plugin template not found at $TEMPLATE_DIR" >&2
+  echo "[wiki-migrate] plugin template not found at $TEMPLATE_DIR" >&2
   exit 1
 fi
 ```
@@ -344,7 +350,99 @@ if [ "$SKIP_SCHEMA_UPDATE" != "1" ]; then
 fi
 ```
 
-## Step 9: Log and summarize
+## Step 9: Insert Activity heatmap into index.md (v0.5+)
+
+Add the Contribution Graph heatmap section to the vault's `wiki/index.md` if missing. The decision flow is conservative — customized indexes are never overwritten without `--force`.
+
+```bash
+vault_index="$VAULT/wiki/index.md"
+template_index="$TEMPLATE_DIR/wiki/index.md"
+heatmap_inserted=0
+heatmap_status=""
+
+if [ ! -f "$vault_index" ]; then
+  # (1) Vault has no index.md at all (e.g. pre-v0.3) — copy the full template
+  if [ "$DRY_RUN" = "0" ]; then
+    mkdir -p "$VAULT/wiki"
+    cp "$template_index" "$vault_index"
+  fi
+  heatmap_status="created index.md from template"
+  heatmap_inserted=1
+elif grep -q '^## Activity heatmap$' "$vault_index"; then
+  # (2) Section already present — no-op (idempotent case)
+  heatmap_status="heatmap section already present"
+else
+  heatmap_status=$(python3 - "$vault_index" "$template_index" "$DRY_RUN" "$FORCE" <<'PYEOF'
+import sys, pathlib, re
+
+vault_path, template_path, dry_run, force = sys.argv[1:5]
+dry_run = dry_run == "1"
+force = force == "1"
+
+vault_text = pathlib.Path(vault_path).read_text(encoding="utf-8")
+template_text = pathlib.Path(template_path).read_text(encoding="utf-8")
+
+# Extract the heatmap block from the template (from "## Activity heatmap" up to the next "## " heading, exclusive).
+m = re.search(r"(## Activity heatmap\n.*?)(?=^## )", template_text, re.S | re.M)
+if not m:
+    print("error: template missing Activity heatmap section")
+    sys.exit(2)
+heatmap_block = m.group(1).rstrip() + "\n\n"
+
+lines = vault_text.splitlines(keepends=True)
+# Skip YAML frontmatter if present at file top
+i = 0
+if lines and lines[0].rstrip("\n") == "---":
+    for j in range(1, len(lines)):
+        if lines[j].rstrip("\n") == "---":
+            i = j + 1
+            break
+# Skip blank lines
+while i < len(lines) and lines[i].strip() == "":
+    i += 1
+
+# Anchor detection: first non-blank non-frontmatter line must be "# Index"
+if i < len(lines) and lines[i].rstrip("\n").rstrip() == "# Index":
+    anchor_idx = i
+    # Insert heatmap block after the "# Index" heading and any existing intro paragraph.
+    # Find the next section boundary: either the next heading (## ) or end of file.
+    insert_at = anchor_idx + 1
+    # Preserve the intro paragraph immediately following # Index (up to but not including first ## heading)
+    k = insert_at
+    while k < len(lines) and not lines[k].startswith("## "):
+        k += 1
+    insert_at = k
+
+    new_lines = lines[:insert_at] + [heatmap_block] + lines[insert_at:]
+    new_text = "".join(new_lines)
+    if not dry_run:
+        pathlib.Path(vault_path + ".bak").write_text(vault_text, encoding="utf-8")
+        pathlib.Path(vault_path).write_text(new_text, encoding="utf-8")
+    print("inserted after `# Index` anchor" + (" (dry-run)" if dry_run else ""))
+elif force:
+    # --force: prepend heatmap to the file (after frontmatter if any)
+    prepend_at = i  # after frontmatter + blanks
+    new_lines = lines[:prepend_at] + [heatmap_block] + lines[prepend_at:]
+    new_text = "".join(new_lines)
+    if not dry_run:
+        pathlib.Path(vault_path + ".bak").write_text(vault_text, encoding="utf-8")
+        pathlib.Path(vault_path).write_text(new_text, encoding="utf-8")
+    print("prepended via --force (anchor `# Index` not found)" + (" (dry-run)" if dry_run else ""))
+else:
+    print("WARN: index.md: cannot locate `# Index` anchor (customized). Paste the Activity heatmap block manually, or re-run with --force to prepend.")
+PYEOF
+)
+  case "$heatmap_status" in
+    inserted*|prepended*) heatmap_inserted=1 ;;
+    WARN*) heatmap_inserted=0 ;;
+    error*) echo "[error] $heatmap_status" >&2 ;;
+  esac
+fi
+
+echo "index.md: $heatmap_status"
+```
+
+## Step 10: Log and summarize
 
 Append a single summary line to `<VAULT>/wiki/log.md` (skipped in `--dry-run`):
 
@@ -352,8 +450,8 @@ Append a single summary line to `<VAULT>/wiki/log.md` (skipped in `--dry-run`):
 if [ "$DRY_RUN" = "0" ]; then
   today=$(date +%Y-%m-%d)
   mkdir -p "$VAULT/wiki"
-  printf '\n## [%s] MIGRATE-DATAVIEW | processed=%d, changed=%d, orphan=%d, error=%d\n' \
-    "$today" "$processed" "$changed" "$orphan" "$error" >> "$VAULT/wiki/log.md"
+  printf '\n## [%s] MIGRATE | processed=%d, changed=%d, orphan=%d, error=%d, heatmap=%d\n' \
+    "$today" "$processed" "$changed" "$orphan" "$error" "$heatmap_inserted" >> "$VAULT/wiki/log.md"
 fi
 
 cat <<EOF
@@ -362,13 +460,14 @@ Migration complete.
   Changed:   $changed pages
   Orphan:    $orphan (wiki page exists but raw file missing — logged as MIGRATE-ORPHAN)
   Error:     $error (frontmatter parse failure — logged as MIGRATE-ERROR)
+  Heatmap:   $heatmap_status
 EOF
 ```
 
 ## Notes
 
 - **Idempotency**: re-running on the same vault produces `changed=0` because derived fields are pure functions of raw content and `source_id`
-- **Bugfix propagation**: if a future release fixes a derived-field computation bug, re-running `/wiki-migrate-dataview` automatically reconciles all pages — there is no "frozen bad value" risk
+- **Bugfix propagation**: if a future release fixes a derived-field computation bug, re-running `/wiki-migrate` automatically reconciles all pages — there is no "frozen bad value" risk
 - **Raw files are never modified** — the command reads raw to compute derived values but does not write to `raw/`
 - **Body preservation**: only the frontmatter block (everything between the first two `---` lines) is touched. Summary / Key Claims / Connections sections are left intact
 - **User-added frontmatter keys are preserved** — only the known derived keys (`source_type`, `word_count`, `reading_time_min`, `session_id`, `source_url`, `domain`, `captured_at`, `captured_by`) and the pre-existing v0.3 keys (`title`, `type`, `tags`, `source_id`, `source_hash`, `last_updated`) are recognized; everything else is passed through unchanged

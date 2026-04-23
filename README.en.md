@@ -23,7 +23,9 @@ A Claude Code plugin that implements [Andrej Karpathy's LLM Wiki pattern](https:
 
 Starting with v0.3, **web pages Claude reads via `WebFetch` also flow into the wiki automatically** (explicit clipping via `/wiki-clip` is also supported; authenticated pages go through `browser-use` to reuse your Chrome login session). Everything you and Claude read together gets captured.
 
-As of v0.4, the accumulated wiki is queryable via **Obsidian Dataview**. Source pages are auto-tagged with `source_type` / `word_count` / `reading_time_min` / `domain` frontmatter, and `wiki/dashboards/` ships 8 pre-built views (recent sources, clips by domain, popular entities, orphan concepts, etc.). Existing vaults can be upgraded in place with `/wiki-migrate-dataview`.
+As of v0.4, the accumulated wiki is queryable via **Obsidian Dataview**. Source pages are auto-tagged with `source_type` / `word_count` / `reading_time_min` / `domain` frontmatter, and `wiki/dashboards/` ships 8 pre-built views (recent sources, clips by domain, popular entities, orphan concepts, etc.). Existing vaults can be upgraded in place with `/wiki-migrate`.
+
+As of v0.5, `wiki/index.md` embeds a **GitHub-style yearly activity heatmap** at the top (requires the [Contribution Graph](https://github.com/vran-dev/obsidian-contribution-graph) plugin). Opening the vault gives you an at-a-glance view of when and how much you've captured. DataviewJS is not required, so JS Queries can stay OFF. v0.5 also renames `/wiki-migrate-dataview` to `/wiki-migrate` (**breaking change**).
 
 Manual `/wiki-ingest` / `/wiki-query` commands are also provided, but they're secondary — for when you want to explicitly ingest external sources (papers) dropped into `raw/`, or query the accumulated wiki directly.
 
@@ -168,7 +170,7 @@ Claude synthesizes an answer from the relevant pages with `[[wikilink]]` citatio
 | `/wiki-query <question> [--vault <path>] [--save]` | Synthesize an answer from the wiki |
 | `/wiki-clip [<url>] [--browser] [--batch <queue>]` (v0.3+) | Clip a web page into `raw/web/` with images into `raw/assets/`. URL omitted ⇒ clip the current Chrome tab |
 | `/wiki-gc [--dry-run] [--purge-older-than <days>]` (v0.3+) | Move orphan images to `.trash/`; physically delete entries older than 90 days |
-| `/wiki-migrate-dataview [--dry-run] [--skip-schema-update]` (v0.4+) | One-shot retrofit of Dataview-queryable frontmatter onto pre-v0.4 vaults (adds `source_type`, `word_count`, `domain`, etc., swaps `WIKI.md` for the v0.4 template, installs `wiki/dashboards/`) |
+| `/wiki-migrate [--dry-run] [--skip-schema-update] [--force]` (v0.5+) | Retrofit a vault from an older version to the current schema (v0.4 frontmatter fields + dashboards + v0.5 index heatmap). Named `/wiki-migrate-dataview` in v0.4 |
 
 ## Web clipping (v0.3+)
 
@@ -279,18 +281,21 @@ Entity and concept pages are **unchanged** — Dataview's native fields (`length
 
 ### Upgrading an existing vault
 
-Vaults created before v0.4 can be upgraded in place with `/wiki-migrate-dataview`:
+Vaults from older versions can be upgraded in place with `/wiki-migrate`:
 
 ```
-/wiki-migrate-dataview --dry-run     # Preview changes without writing
-/wiki-migrate-dataview               # Actually retrofit
+/wiki-migrate --dry-run     # Preview changes without writing
+/wiki-migrate               # Actually retrofit
 ```
+
+(In v0.4 this command was called `/wiki-migrate-dataview`. It was renamed in v0.5 as a breaking change.)
 
 What it does:
 
 1. Adds derived frontmatter fields to every `wiki/sources/*.md` (body untouched, unknown keys preserved)
-2. Replaces `WIKI.md` with the v0.4 template when the line-1 schema marker is absent or older (keeps `WIKI.md.bak`)
+2. Replaces `WIKI.md` with the current template when the line-1 schema marker is absent or older (keeps `WIKI.md.bak`)
 3. Copies `wiki/dashboards/` if missing (never overwrites existing dashboards)
+4. (v0.5+) Inserts the `## Activity heatmap` section into `wiki/index.md` after the `# Index` heading if missing. If the heading is customized (user-edited, translated, etc.), the command skips with a warning; use `--force` to prepend instead. `index.md.bak` is created on edit.
 
 **Idempotent**: re-running produces zero diff (derived fields are pure functions). Re-running after a bugfix release naturally re-aligns every page.
 
@@ -299,6 +304,14 @@ Pass `--skip-schema-update` to keep a hand-customized `WIKI.md` and `wiki/dashbo
 ### Enabling Dataview in Obsidian
 
 Settings → Community plugins → Browse → search "Dataview" → Install + Enable. DataviewJS is not required (all shipped dashboards are plain DQL).
+
+### Enabling Contribution Graph in Obsidian (v0.5+, for the Activity heatmap)
+
+The Activity heatmap embedded at the top of `wiki/index.md` is rendered by [Contribution Graph](https://github.com/vran-dev/obsidian-contribution-graph). Install it the same way:
+
+Settings → Community plugins → Browse → search "Contribution Graph" → Install + Enable.
+
+DataviewJS is not required — the plugin provides its own `contributionGraph` code block, so JS Queries can stay OFF. If the plugin is not installed, `index.md` still opens fine; the code block is just shown as source.
 
 ## Auto-ingest (v0.2+)
 
@@ -404,9 +417,9 @@ Every page is plain Markdown with YAML frontmatter and `[[wikilink]]` cross-refe
 
 - [x] v0.2: Auto-ingest machinery (dirty-count gate + background spawn)
 - [x] v0.3: Input-layer expansion — `/wiki-clip`, `PostToolUse[WebFetch]` auto-capture, `browser-use` for auth walls, `/wiki-gc` for orphan images
-- [x] v0.4: Dataview support — auto-populated `source_type` / `word_count` / `domain` frontmatter, 8 shipped dashboards under `wiki/dashboards/`, `/wiki-migrate-dataview` for retrofitting existing vaults
-- [ ] v0.5: Privacy filter at capture time (block sensitive topics)
-- [ ] v0.6: Bidirectional MERGE across `wiki/sources/` (e.g., when a web clip is reused from a new session, write the back-edge onto the web clip page too)
+- [x] v0.4: Dataview support — auto-populated `source_type` / `word_count` / `domain` frontmatter, 8 shipped dashboards under `wiki/dashboards/`, `/wiki-migrate` for retrofitting existing vaults
+- [x] v0.5: GitHub-style activity heatmap on `index.md` (Contribution Graph plugin; no DataviewJS) + `/wiki-migrate-dataview` renamed to `/wiki-migrate` (breaking change)
+- [ ] v0.6: Privacy filter at capture time (block sensitive topics), bidirectional MERGE across `wiki/sources/` (e.g., when a web clip is reused from a new session, write the back-edge onto the web clip page too)
 - [ ] Later: graph-aware lint (orphans, broken links, contradictions), Obsidian Bases/Canvas templates, HTML publishing via Quartz
 
 ## Migrating from exomemory v1

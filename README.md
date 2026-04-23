@@ -23,7 +23,9 @@
 
 v0.3 からは会話だけでなく **Claude が `WebFetch` で読んだページも自動的に wiki に流れ込む**（`/wiki-clip` で明示クリップも可、認証付きページは `browser-use` 経由で Chrome のログインセッションを流用）。これで「Claude と一緒に読んだもの」が全部蓄積される。
 
-v0.4 では蓄積された wiki を **Obsidian Dataview で横断クエリ**できるよう、source page に `source_type` / `word_count` / `reading_time_min` / `domain` などの frontmatter を自動付与し、`wiki/dashboards/` に「直近 source」「domain 別 web クリップ」「人気 entity」など 8 種のダッシュボードを同梱する（`/wiki-migrate-dataview` で既存 vault も一発で v0.4 スキーマに揃う）。
+v0.4 では蓄積された wiki を **Obsidian Dataview で横断クエリ**できるよう、source page に `source_type` / `word_count` / `reading_time_min` / `domain` などの frontmatter を自動付与し、`wiki/dashboards/` に「直近 source」「domain 別 web クリップ」「人気 entity」など 8 種のダッシュボードを同梱する（`/wiki-migrate` で既存 vault も一発で現行スキーマに揃う）。
+
+v0.5 では `wiki/index.md` の冒頭に **GitHub 草風の年間アクティビティヒートマップ**が入るようになった（[Contribution Graph](https://github.com/vran-dev/obsidian-contribution-graph) プラグインが必要）。vault を開いた瞬間に「いつ / どれだけ情報を溜めたか」が一目でわかる。DataviewJS は不要なので JS Queries は OFF のまま運用可能。同時に `/wiki-migrate-dataview` は `/wiki-migrate` にリネーム（**破壊的変更**）。
 
 手動の `/wiki-ingest` / `/wiki-query` コマンドも提供するが、これは補助的な位置づけ — 外部ソース（論文など）を `raw/` に投入して明示的に取り込んだり、蓄積された wiki に直接問い合わせたい時のためのもの。
 
@@ -139,7 +141,7 @@ Claude が関連ページを `[[wikilink]]` 引用付きで合成して答える
 | `/wiki-query <question> [--vault <path>] [--save]` | wiki から合成回答を生成 |
 | `/wiki-clip [<url>] [--browser] [--batch <queue>]` (v0.3+) | web ページを `raw/web/` にクリップ、画像は `raw/assets/` に content-address 保存。URL 省略で現タブを取得 |
 | `/wiki-gc [--dry-run] [--purge-older-than <days>]` (v0.3+) | `raw/assets/` から孤立画像を `.trash/` に論理削除、90日超経過で物理削除 |
-| `/wiki-migrate-dataview [--dry-run] [--skip-schema-update]` (v0.4+) | v0.3 以前に作った vault を v0.4 スキーマへ retrofit（source page に `source_type` / `word_count` / `domain` 等を付与、`WIKI.md` を新 template に差し替え、`wiki/dashboards/` を導入） |
+| `/wiki-migrate [--dry-run] [--skip-schema-update] [--force]` (v0.5+) | 旧バージョンで作った vault を現行スキーマへ retrofit（v0.4 の frontmatter 派生フィールド + dashboards + v0.5 の index heatmap）。v0.4 時代は `/wiki-migrate-dataview` だった |
 
 ## Web clipping (v0.3+)
 
@@ -253,12 +255,14 @@ entity / concept page は **変更なし**。Dataview の native field（`length
 
 ### 既存 vault の upgrade
 
-v0.3 以前に作成した vault は `/wiki-migrate-dataview` で v0.4 化する：
+旧バージョンで作成した vault は `/wiki-migrate` で現行スキーマに揃える：
 
 ```
-/wiki-migrate-dataview --dry-run     # 変更予定を確認（write なし）
-/wiki-migrate-dataview               # 実際に retrofit
+/wiki-migrate --dry-run     # 変更予定を確認（write なし）
+/wiki-migrate               # 実際に retrofit
 ```
+
+（v0.4 時代の `/wiki-migrate-dataview` は v0.5 で `/wiki-migrate` にリネームされた。破壊的変更）
 
 実行内容:
 
@@ -273,6 +277,14 @@ WIKI.md を手書きカスタムしている場合は `--skip-schema-update` で
 ### Dataview plugin の導入
 
 Obsidian → Settings → Community plugins → Browse → "Dataview" → Install + Enable。DataviewJS は不要（本プラグインの dashboards は全て DQL のみ）。
+
+### Contribution Graph plugin の導入（v0.5+、Activity heatmap 用）
+
+`wiki/index.md` 冒頭の Activity heatmap を描画するには [Contribution Graph](https://github.com/vran-dev/obsidian-contribution-graph) プラグインが必要。Dataview と同じ手順で install：
+
+Obsidian → Settings → Community plugins → Browse → "Contribution Graph" → Install + Enable。
+
+DataviewJS は不要（プラグイン独自の `contributionGraph` コードブロックを使うので JS Queries は OFF のままで OK）。未インストールのまま index.md を開いても壊れず、コードブロックがソース表示されるだけ。
 
 ## Auto-capture
 
@@ -524,9 +536,9 @@ rm -rf ~/.claude/plugins/cache/exomemory2/
 
 - [x] v0.2: auto-ingest 機構（dirty 判定 + gate + background spawn）
 - [x] v0.3: 入力層の拡張 — `/wiki-clip` + `PostToolUse[WebFetch]` 自動クリップ + browser-use による認証壁対応 + `/wiki-gc` 孤立画像 GC
-- [x] v0.4: Dataview 対応 — source page に `source_type` / `word_count` / `domain` 等の frontmatter を自動付与、`wiki/dashboards/` に 8 種のビュー同梱、`/wiki-migrate-dataview` で既存 vault を retrofit
-- [ ] v0.5: capture 時のプライバシーフィルタ（機密トピック除外）
-- [ ] v0.6: wiki 側の source page 間 MERGE（例: 同じ web clip が複数セッションから参照されたとき、どの handover が触ったかを web clip 側にも記録する bidirectional graph）
+- [x] v0.4: Dataview 対応 — source page に `source_type` / `word_count` / `domain` 等の frontmatter を自動付与、`wiki/dashboards/` に 8 種のビュー同梱、`/wiki-migrate` で既存 vault を retrofit
+- [x] v0.5: `index.md` に GitHub 草風のアクティビティヒートマップ同梱（Contribution Graph プラグイン連携、DataviewJS 不要）+ `/wiki-migrate-dataview` を `/wiki-migrate` に汎用化リネーム
+- [ ] v0.6: capture 時のプライバシーフィルタ（機密トピック除外）、source page 間 MERGE（例: 同じ web clip が複数セッションから参照されたとき、どの handover が触ったかを web clip 側にも記録する bidirectional graph）
 - [ ] 将来: graph-aware lint（孤立ページ、リンク切れ、矛盾検出）、Obsidian Bases / Canvas テンプレート、Quartz 経由の HTML 公開
 
 ## License

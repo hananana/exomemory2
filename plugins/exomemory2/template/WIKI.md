@@ -3,7 +3,7 @@
 
 This file defines the schema and workflow for this vault. Claude reads this file during every `/wiki-ingest` and `/wiki-query` operation.
 
-**Schema version marker** (line 1): `/wiki-migrate-dataview` inspects the first line of this file to decide whether the schema needs to be upgraded to a newer template. Do not remove the marker even when hand-customizing this file. Use `--skip-schema-update` on migration if you want to keep a customized WIKI.md.
+**Schema version marker** (line 1): `/wiki-migrate` inspects the first line of this file to decide whether the schema needs to be upgraded to a newer template. Do not remove the marker even when hand-customizing this file. Use `--skip-schema-update` on migration if you want to keep a customized WIKI.md.
 
 Based on [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
 
@@ -103,7 +103,7 @@ captured_at: <ISO8601>
 captured_by: manual-clip | auto-webfetch | auto-browser
 ```
 
-These v0.4+ derived fields are recomputed on every `/wiki-ingest` CREATE/UPDATE (see Step 3) and by `/wiki-migrate-dataview` for historical pages. Unknown frontmatter keys (user-authored notes, custom tags) are preserved on UPDATE.
+These v0.4+ derived fields are recomputed on every `/wiki-ingest` CREATE/UPDATE (see Step 3) and by `/wiki-migrate` for historical pages. Unknown frontmatter keys (user-authored notes, custom tags) are preserved on UPDATE.
 
 ### Web clip raw file frontmatter
 
@@ -292,7 +292,7 @@ Append-only. One line per operation:
 
 Where `<op>` ∈ `{CREATE, UPDATE, MERGE, SKIP, SKIP-empty, MIGRATE-DATAVIEW, MIGRATE-ORPHAN, MIGRATE-ERROR}`. For slug collisions that triggered an error, do not log (the error is reported to the user only).
 
-`/wiki-migrate-dataview` writes a single summary line of the form `## [YYYY-MM-DD] MIGRATE-DATAVIEW | processed=<N>, changed=<C>, orphan=<O>, error=<E>`. Individual skipped pages are logged as `MIGRATE-ORPHAN` (raw file missing) or `MIGRATE-ERROR` (unparseable frontmatter).
+`/wiki-migrate` writes a single summary line of the form `## [YYYY-MM-DD] MIGRATE | processed=<N>, changed=<C>, orphan=<O>, error=<E>`. Individual skipped pages are logged as `MIGRATE-ORPHAN` (raw file missing) or `MIGRATE-ERROR` (unparseable frontmatter). (Vaults migrated under v0.4 may have historical `MIGRATE-DATAVIEW` entries — those are left intact.)
 
 ## Notes on handovers
 
@@ -346,7 +346,7 @@ Dashboards under `wiki/dashboards/` use these native fields directly; no frontma
 
 **Bringing an existing vault to v0.4:**
 
-Run `/wiki-migrate-dataview` once. It will:
+Run `/wiki-migrate` once. It will:
 
 1. Retrofit derived fields on all `wiki/sources/*.md` pages (idempotent — re-runs produce no diff)
 2. Replace the vault's `WIKI.md` with the v0.4 template if the line-1 schema marker is absent or points at an older version (with `.bak` preserved)
