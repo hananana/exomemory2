@@ -11,7 +11,7 @@ Bring a vault up to the current exomemory2 schema. This generalizes the prior `/
 1. (v0.4) For every `wiki/sources/*.md`, recompute derived frontmatter fields (`source_type`, `word_count`, `reading_time_min`, and handover/web-clip specific fields)
 2. (v0.4) Replace the vault's `WIKI.md` with the current template when the line-1 schema marker is absent or points at an older version
 3. (v0.4) Copy `wiki/dashboards/` files that are missing in the vault
-4. (v0.5) Insert an `## Activity heatmap` section into `wiki/index.md` if missing — see Step 10 for the decision flow
+4. (v0.5+) Insert decorative sections into `wiki/index.md` if missing — Activity heatmap (v0.5), Handover calendar (v0.6), extensible. See Step 9 for the decision flow
 
 This command is **idempotent**: derived fields are pure functions of the raw file and `source_id`, and the heatmap insert is gated by section presence, so re-running on a fully-migrated vault produces zero diff.
 
@@ -350,96 +350,150 @@ if [ "$SKIP_SCHEMA_UPDATE" != "1" ]; then
 fi
 ```
 
-## Step 9: Insert Activity heatmap into index.md (v0.5+)
+## Step 9: Insert decorative sections into index.md (v0.5+)
 
-Add the Contribution Graph heatmap section to the vault's `wiki/index.md` if missing. The decision flow is conservative — customized indexes are never overwritten without `--force`.
+Add the template's decorative sections to the vault's `wiki/index.md` if missing. Driven by a sections list (heatmap, calendar) so v0.7+ can add more entries here without refactoring. The decision flow is conservative — customized indexes are never overwritten without `--force`.
+
+**Current sections (v0.6):**
+| # | Heading | Anchor (insert after) | Introduced |
+|---|---------|-----------------------|------------|
+| 1 | `## Activity heatmap` | `# Index` (H1, stricter anchor detection) | v0.5 |
+| 2 | `## Handover calendar` | `## Activity heatmap` (H2) | v0.6 |
+
+Each section is evaluated independently:
+- **Already present** (heading found in vault) → skip (no-op, idempotent case)
+- **Missing, anchor present** → insert the block immediately after the anchor section's content
+- **Missing, anchor not found** → skip + warning by default; `--force` prepends the block to the file top (after YAML frontmatter if any)
+
+Sections are processed in order, so inserting heatmap in the same run unlocks the calendar's anchor.
 
 ```bash
 vault_index="$VAULT/wiki/index.md"
 template_index="$TEMPLATE_DIR/wiki/index.md"
-heatmap_inserted=0
-heatmap_status=""
+index_updated=0
+index_status=""
 
 if [ ! -f "$vault_index" ]; then
-  # (1) Vault has no index.md at all (e.g. pre-v0.3) — copy the full template
+  # Vault has no index.md at all (e.g. pre-v0.3) — copy the full template
   if [ "$DRY_RUN" = "0" ]; then
     mkdir -p "$VAULT/wiki"
     cp "$template_index" "$vault_index"
   fi
-  heatmap_status="created index.md from template"
-  heatmap_inserted=1
-elif grep -q '^## Activity heatmap$' "$vault_index"; then
-  # (2) Section already present — no-op (idempotent case)
-  heatmap_status="heatmap section already present"
+  index_status="created index.md from template"
+  index_updated=1
 else
-  heatmap_status=$(python3 - "$vault_index" "$template_index" "$DRY_RUN" "$FORCE" <<'PYEOF'
+  index_status=$(python3 - "$vault_index" "$template_index" "$DRY_RUN" "$FORCE" <<'PYEOF'
 import sys, pathlib, re
 
 vault_path, template_path, dry_run, force = sys.argv[1:5]
 dry_run = dry_run == "1"
 force = force == "1"
 
-vault_text = pathlib.Path(vault_path).read_text(encoding="utf-8")
+# Sections to maintain on index.md, ordered. `anchor_level=1` triggers strict
+# "first non-blank non-frontmatter line" detection; level=2 is a simple heading match.
+SECTIONS = [
+    {"heading": "## Activity heatmap", "anchor": "# Index",           "anchor_level": 1},
+    {"heading": "## Handover calendar", "anchor": "## Activity heatmap", "anchor_level": 2},
+]
+
+original_text = pathlib.Path(vault_path).read_text(encoding="utf-8")
 template_text = pathlib.Path(template_path).read_text(encoding="utf-8")
 
-# Extract the heatmap block from the template (from "## Activity heatmap" up to the next "## " heading, exclusive).
-m = re.search(r"(## Activity heatmap\n.*?)(?=^## )", template_text, re.S | re.M)
-if not m:
-    print("error: template missing Activity heatmap section")
-    sys.exit(2)
-heatmap_block = m.group(1).rstrip() + "\n\n"
+def extract_block(text, heading):
+    """Extract a section (heading line through the line before the next `## ` heading, or EOF)."""
+    h_esc = re.escape(heading)
+    m = re.search(rf"({h_esc}\n.*?)(?=^## |\Z)", text, re.S | re.M)
+    if not m:
+        return None
+    return m.group(1).rstrip() + "\n\n"
 
-lines = vault_text.splitlines(keepends=True)
-# Skip YAML frontmatter if present at file top
-i = 0
-if lines and lines[0].rstrip("\n") == "---":
-    for j in range(1, len(lines)):
-        if lines[j].rstrip("\n") == "---":
-            i = j + 1
-            break
-# Skip blank lines
-while i < len(lines) and lines[i].strip() == "":
-    i += 1
+def skip_frontmatter_and_blanks(lines):
+    i = 0
+    if lines and lines[0].rstrip("\n") == "---":
+        for j in range(1, len(lines)):
+            if lines[j].rstrip("\n") == "---":
+                i = j + 1
+                break
+    while i < len(lines) and lines[i].strip() == "":
+        i += 1
+    return i
 
-# Anchor detection: first non-blank non-frontmatter line must be "# Index"
-if i < len(lines) and lines[i].rstrip("\n").rstrip() == "# Index":
-    anchor_idx = i
-    # Insert heatmap block after the "# Index" heading and any existing intro paragraph.
-    # Find the next section boundary: either the next heading (## ) or end of file.
-    insert_at = anchor_idx + 1
-    # Preserve the intro paragraph immediately following # Index (up to but not including first ## heading)
-    k = insert_at
+def find_h1_anchor(lines, heading):
+    """Return index of the heading if it's the first non-blank non-frontmatter line; else -1."""
+    i = skip_frontmatter_and_blanks(lines)
+    if i < len(lines) and lines[i].rstrip("\n").rstrip() == heading:
+        return i
+    return -1
+
+def find_h2_anchor(lines, heading):
+    """Return line index of an H2 heading matching exactly, or -1."""
+    h = heading.rstrip()
+    for idx, line in enumerate(lines):
+        if line.rstrip("\n").rstrip() == h:
+            return idx
+    return -1
+
+def content_end_after(lines, start_idx):
+    """Given a heading line at start_idx, return position before the next `## ` heading (or EOF)."""
+    k = start_idx + 1
     while k < len(lines) and not lines[k].startswith("## "):
         k += 1
-    insert_at = k
+    return k
 
-    new_lines = lines[:insert_at] + [heatmap_block] + lines[insert_at:]
-    new_text = "".join(new_lines)
-    if not dry_run:
-        pathlib.Path(vault_path + ".bak").write_text(vault_text, encoding="utf-8")
-        pathlib.Path(vault_path).write_text(new_text, encoding="utf-8")
-    print("inserted after `# Index` anchor" + (" (dry-run)" if dry_run else ""))
-elif force:
-    # --force: prepend heatmap to the file (after frontmatter if any)
-    prepend_at = i  # after frontmatter + blanks
-    new_lines = lines[:prepend_at] + [heatmap_block] + lines[prepend_at:]
-    new_text = "".join(new_lines)
-    if not dry_run:
-        pathlib.Path(vault_path + ".bak").write_text(vault_text, encoding="utf-8")
-        pathlib.Path(vault_path).write_text(new_text, encoding="utf-8")
-    print("prepended via --force (anchor `# Index` not found)" + (" (dry-run)" if dry_run else ""))
-else:
-    print("WARN: index.md: cannot locate `# Index` anchor (customized). Paste the Activity heatmap block manually, or re-run with --force to prepend.")
+lines = original_text.splitlines(keepends=True)
+messages = []
+any_change = False
+
+for section in SECTIONS:
+    heading = section["heading"]
+    anchor = section["anchor"]
+    level = section["anchor_level"]
+
+    # Idempotent skip: heading already in the file
+    if any(line.rstrip("\n").rstrip() == heading for line in lines):
+        messages.append(f"{heading}: already present")
+        continue
+
+    block = extract_block(template_text, heading)
+    if block is None:
+        messages.append(f"{heading}: error — template missing section")
+        continue
+
+    anchor_idx = find_h1_anchor(lines, anchor) if level == 1 else find_h2_anchor(lines, anchor)
+
+    if anchor_idx >= 0:
+        insert_at = content_end_after(lines, anchor_idx)
+        block_lines = block.splitlines(keepends=True)
+        lines = lines[:insert_at] + block_lines + lines[insert_at:]
+        messages.append(f"{heading}: inserted after `{anchor}`")
+        any_change = True
+    elif force:
+        p = skip_frontmatter_and_blanks(lines)
+        block_lines = block.splitlines(keepends=True)
+        lines = lines[:p] + block_lines + lines[p:]
+        messages.append(f"{heading}: prepended via --force (anchor `{anchor}` not found)")
+        any_change = True
+    else:
+        messages.append(f"{heading}: WARN — anchor `{anchor}` not found, skipped (use --force to prepend)")
+
+new_text = "".join(lines)
+
+if any_change and new_text != original_text and not dry_run:
+    pathlib.Path(vault_path + ".bak").write_text(original_text, encoding="utf-8")
+    pathlib.Path(vault_path).write_text(new_text, encoding="utf-8")
+
+for msg in messages:
+    prefix = "(dry-run) " if dry_run and any_change else ""
+    print(prefix + msg)
 PYEOF
 )
-  case "$heatmap_status" in
-    inserted*|prepended*) heatmap_inserted=1 ;;
-    WARN*) heatmap_inserted=0 ;;
-    error*) echo "[error] $heatmap_status" >&2 ;;
-  esac
+  if echo "$index_status" | grep -q -E '(inserted|prepended)'; then
+    index_updated=1
+  fi
 fi
 
-echo "index.md: $heatmap_status"
+echo "index.md:"
+echo "$index_status" | sed 's/^/  /'
 ```
 
 ## Step 10: Log and summarize
@@ -450,8 +504,8 @@ Append a single summary line to `<VAULT>/wiki/log.md` (skipped in `--dry-run`):
 if [ "$DRY_RUN" = "0" ]; then
   today=$(date +%Y-%m-%d)
   mkdir -p "$VAULT/wiki"
-  printf '\n## [%s] MIGRATE | processed=%d, changed=%d, orphan=%d, error=%d, heatmap=%d\n' \
-    "$today" "$processed" "$changed" "$orphan" "$error" "$heatmap_inserted" >> "$VAULT/wiki/log.md"
+  printf '\n## [%s] MIGRATE | processed=%d, changed=%d, orphan=%d, error=%d, index_updated=%d\n' \
+    "$today" "$processed" "$changed" "$orphan" "$error" "$index_updated" >> "$VAULT/wiki/log.md"
 fi
 
 cat <<EOF
@@ -460,7 +514,7 @@ Migration complete.
   Changed:   $changed pages
   Orphan:    $orphan (wiki page exists but raw file missing — logged as MIGRATE-ORPHAN)
   Error:     $error (frontmatter parse failure — logged as MIGRATE-ERROR)
-  Heatmap:   $heatmap_status
+  Index:     updated=$index_updated
 EOF
 ```
 

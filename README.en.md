@@ -27,6 +27,8 @@ As of v0.4, the accumulated wiki is queryable via **Obsidian Dataview**. Source 
 
 As of v0.5, `wiki/index.md` embeds a **GitHub-style yearly activity heatmap** at the top (requires the [Contribution Graph](https://github.com/vran-dev/obsidian-contribution-graph) plugin). Opening the vault gives you an at-a-glance view of when and how much you've captured. DataviewJS is not required, so JS Queries can stay OFF. v0.5 also renames `/wiki-migrate-dataview` to `/wiki-migrate` (**breaking change**).
 
+v0.6 adds a **Dataview `CALENDAR` monthly view** right below the heatmap, showing the daily density of Claude handover captures. No extra plugin needed (Dataview only, still no DataviewJS). The axis uses `last_captured_at` from `raw/handovers/*.md`, which is stable across re-ingests and page edits.
+
 Manual `/wiki-ingest` / `/wiki-query` commands are also provided, but they're secondary — for when you want to explicitly ingest external sources (papers) dropped into `raw/`, or query the accumulated wiki directly.
 
 ## Contents
@@ -419,7 +421,8 @@ Every page is plain Markdown with YAML frontmatter and `[[wikilink]]` cross-refe
 - [x] v0.3: Input-layer expansion — `/wiki-clip`, `PostToolUse[WebFetch]` auto-capture, `browser-use` for auth walls, `/wiki-gc` for orphan images
 - [x] v0.4: Dataview support — auto-populated `source_type` / `word_count` / `domain` frontmatter, 8 shipped dashboards under `wiki/dashboards/`, `/wiki-migrate` for retrofitting existing vaults
 - [x] v0.5: GitHub-style activity heatmap on `index.md` (Contribution Graph plugin; no DataviewJS) + `/wiki-migrate-dataview` renamed to `/wiki-migrate` (breaking change)
-- [ ] v0.6: Privacy filter at capture time (block sensitive topics), bidirectional MERGE across `wiki/sources/` (e.g., when a web clip is reused from a new session, write the back-edge onto the web clip page too)
+- [x] v0.6: Handover calendar (monthly view) on `index.md` via the built-in Dataview `CALENDAR` query — no extra plugin. `/wiki-migrate`'s index-section-insert logic is now driven by a `SECTIONS` list for easy extension.
+- [ ] v0.7: Privacy filter at capture time (block sensitive topics), bidirectional MERGE across `wiki/sources/` (e.g., when a web clip is reused from a new session, write the back-edge onto the web clip page too)
 - [ ] Later: graph-aware lint (orphans, broken links, contradictions), Obsidian Bases/Canvas templates, HTML publishing via Quartz
 
 ## Migrating from exomemory v1

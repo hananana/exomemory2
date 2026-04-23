@@ -139,7 +139,7 @@ For **CREATE** or **UPDATE**:
 6. For each mentioned concept: same pattern in `<VAULT>/wiki/concepts/`
 7. Update `<VAULT>/wiki/index.md`:
    - Under the relevant section (Sources / Entities / Concepts), append `- [[<slug>]] — <title>` for each newly-created page. No duplicates.
-   - **Invariant (v0.5+):** Only append to `## Sources` / `## Entities` / `## Concepts`. Never overwrite the whole file — user content above those sections (e.g. the `## Activity heatmap` block that ships in the v0.5 template and is inserted by `/wiki-migrate`) must be preserved.
+   - **Invariant (v0.5+):** Only append to `## Sources` / `## Entities` / `## Concepts`. Never overwrite the whole file — user content above those sections (e.g. the `## Activity heatmap` and `## Handover calendar` blocks that ship in the template and are inserted by `/wiki-migrate`) must be preserved.
 8. Update `<VAULT>/wiki/overview.md`: append or lightly revise. **Do not rewrite from scratch**.
 9. Append to `<VAULT>/wiki/log.md`: `## [<today>] CREATE | <slug>` (or `UPDATE` / `MERGE`). Get today's date:
    ```bash

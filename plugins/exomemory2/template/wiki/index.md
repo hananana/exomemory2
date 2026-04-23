@@ -25,6 +25,15 @@ cellStyleRules:
     max: 999
 ```
 
+## Handover calendar
+
+Monthly density of Claude handover captures. Rendered by [Obsidian Dataview](https://github.com/blacksmithgu/obsidian-dataview) (no DataviewJS required). Uses `last_captured_at` from raw handover files for a stable timeline (unaffected by re-ingest).
+
+```dataview
+CALENDAR last_captured_at
+FROM "raw/handovers"
+```
+
 ## Sources
 
 <!-- source pages will be listed here: `- [[<slug>]] — <title>` -->

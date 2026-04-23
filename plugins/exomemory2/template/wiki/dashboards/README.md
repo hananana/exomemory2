@@ -36,6 +36,15 @@ Each dashboard file is just a DQL snippet — edit freely. The v0.4 frontmatter 
 
 Entity and concept pages have no extra frontmatter; use Dataview natives `file.inlinks`, `file.ctime`, `file.mtime` instead.
 
+## Other views on `index.md`
+
+`wiki/index.md` itself carries two visualisations that are **not** dashboard files (they live on the index page directly):
+
+- **Activity heatmap** (v0.5+) — year-at-a-glance capture density via the [Contribution Graph](https://github.com/vran-dev/obsidian-contribution-graph) plugin
+- **Handover calendar** (v0.6+) — monthly density of Claude handover captures via a Dataview `CALENDAR` query (no extra plugin)
+
+Both are inserted automatically by `/wiki-init` (new vaults) or `/wiki-migrate` (existing vaults).
+
 ## Graph view tips
 
 Obsidian's built-in Graph view (Cmd/Ctrl+G) works without any setup, but becomes much more readable with color groups. Configure:
