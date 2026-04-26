@@ -29,6 +29,8 @@ v0.5 では `wiki/index.md` の冒頭に **GitHub 草風の年間アクティビ
 
 v0.6 では heatmap の直下に **Dataview `CALENDAR` による月ビュー**を追加。Claude との会話セッション（handover）の capture 日別密度が見える。追加プラグインは不要（Dataview 標準機能）、DataviewJS も不要。軸は `raw/handovers/*.md` の `last_captured_at` を使うので、再 ingest や page 編集では動かない。
 
+v0.8 では **SessionStart orphan rescue** が入った。tmux の `prefix + x` のように Claude Code が SIGHUP で即死するケース（SessionEnd hook が走らない）でも、次のセッション起動時に未 handover の transcript と滞留した clip queue を自動検出してバックグラウンドで取り込む。`prefix + x` を含めた閉じ方ぜんぶに対して、handover 化と ingest が漏れなく走るようになった。
+
 手動の `/wiki-ingest` / `/wiki-query` コマンドも提供するが、これは補助的な位置づけ — 外部ソース（論文など）を `raw/` に投入して明示的に取り込んだり、蓄積された wiki に直接問い合わせたい時のためのもの。
 
 ## Contents
