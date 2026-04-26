@@ -66,12 +66,18 @@ run_once() {
   local start end wall exit_code log_after log_delta
   start="$(date +%s.%N)"
   set +e
+  local plugin_dir_flag=""
+  if [ "${BENCH_USE_REPO_PLUGIN:-0}" = "1" ]; then
+    plugin_dir_flag="--plugin-dir $REPO_DIR/plugins/exomemory2"
+  fi
+
   printf '%s\n' '{"type":"user","message":{"role":"user","content":"/exomemory2:wiki-ingest"}}' | \
     EXOMEMORY_VAULT="$BENCH_VAULT" "$CLAUDE_BIN" -p \
       --input-format stream-json \
       --output-format stream-json \
       --verbose \
       --permission-mode bypassPermissions \
+      $plugin_dir_flag \
       >>"$BENCH_VAULT/.ingest.log" 2>&1
   exit_code=$?
   set -e

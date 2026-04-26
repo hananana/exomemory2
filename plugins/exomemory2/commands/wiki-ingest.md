@@ -6,9 +6,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 
 # /wiki-ingest
 
-Ingest raw sources (file or directory) into the active vault's wiki, following the vault's `WIKI.md` workflow.
-
-With no arguments, the entire `raw/` tree under the active vault is scanned and ingested. The dedup logic in `WIKI.md` (`source_hash` match → `SKIP`) ensures unchanged files are not re-processed, so rerunning is cheap for already-ingested sources.
+Bash-driven hot path. The LLM only intervenes for files that genuinely need new wiki content (CREATE / UPDATE). For the common case where every raw file is unchanged, this command is one bash call plus a one-line report.
 
 ## Arguments
 
@@ -16,143 +14,98 @@ With no arguments, the entire `raw/` tree under the active vault is scanned and 
 $ARGUMENTS
 ```
 
-## Step 1: Parse arguments
+## Step 1: Resolve vault + run preflight (single Bash call)
 
-Tokenize `$ARGUMENTS` by whitespace. If `--vault <path>` appears anywhere, capture that path as the explicit vault override.
-
-The first non-`--vault` positional token (if any) is the raw file or directory path. If no positional token is present (i.e. `$ARGUMENTS` is empty or contains only `--vault <path>`), treat the raw target as **the entire `<VAULT>/raw/` tree** — record this as `RAW_TARGET=<unset>` and resolve it after Step 2.
-
-## Step 2: Resolve the vault
-
-Try in order; stop at the first success. Use `Bash` tool for each check:
-
-1. **Explicit `--vault`** from step 1, if provided. Verify the path contains `WIKI.md`:
-   ```bash
-   test -f "<explicit-vault>/WIKI.md" && echo "OK" || echo "MISSING"
-   ```
-2. **Environment variable** `EXOMEMORY_VAULT` (preferred) or `CLAUDE_MEMORY_VAULT` (deprecated, falls back if `EXOMEMORY_VAULT` is unset; will be removed in v0.3):
-   ```bash
-   echo "${EXOMEMORY_VAULT:-${CLAUDE_MEMORY_VAULT:-}}"
-   ```
-   If non-empty, verify `WIKI.md` exists at that path. If only the legacy `CLAUDE_MEMORY_VAULT` is set, also emit a deprecation warning to stderr.
-3. **Ancestor search** from current working directory upward, looking for a directory containing `WIKI.md`:
-   ```bash
-   pwd
-   d="$(pwd)"
-   while [ "$d" != "/" ]; do
-     if [ -f "$d/WIKI.md" ]; then echo "FOUND: $d"; break; fi
-     d="$(dirname "$d")"
-   done
-   ```
-
-If no vault is resolved, **stop** and reply:
-
-```
-Vault not found.
-Set EXOMEMORY_VAULT to a vault path, pass --vault <path>, or cd into a vault.
-Run /wiki-init <path> to create one.
-```
-
-Call the resolved absolute vault path `VAULT`.
-
-## Step 3: Load the schema
-
-Read `<VAULT>/WIKI.md`. **The WIKI.md is authoritative** — if it disagrees with anything below, WIKI.md wins.
-
-## Step 4: Validate and enumerate raw inputs
-
-If no positional raw target was supplied (`RAW_TARGET=<unset>` from Step 1), use `<VAULT>/raw/` as the target directory.
-
-Otherwise, the raw argument can be absolute or relative to `<VAULT>/raw/`.
-
-- If **absolute**: verify it exists. Check it is inside `<VAULT>/raw/` (prefix match on absolute paths). If outside, stop with error.
-- If **relative**: interpret as `<VAULT>/raw/<arg>`. Verify the resolved absolute path exists.
-
-If the target is a directory, recurse and collect every regular file inside.
-
-When scanning `<VAULT>/raw/` with no filter (the no-argument case), it is normal for the set to include `raw/handovers/*.md` plus anything the user has manually dropped (e.g. `raw/papers/`, `raw/web/`). Unchanged files are detected in Step 5b and get `SKIP`, so scanning the whole tree is cheap even when most files are already ingested.
-
-## Step 5: For each raw file, follow WIKI.md's ingest workflow
-
-### 5.0 Skip empty raw files
-
-Before computing identity, check whether the raw file has any meaningful content beyond YAML frontmatter. A file that contains only frontmatter (or only whitespace after the closing `---`) is an "empty session" and must not produce a wiki source page — those pages are noise.
-
-Detection rule: strip the first YAML frontmatter block (from the opening `---` line to the matching closing `---` line), then check whether any non-whitespace characters remain.
+Resolve `VAULT` (priority: `--vault` arg → `EXOMEMORY_VAULT` env → ancestor search), then resolve `RAW_TARGET` (positional arg if given, else `${VAULT}/raw`), then invoke preflight. **Do this in one Bash call** — there is no value in running env checks as separate turns.
 
 ```bash
-# Returns 0 (true) if the file is empty after stripping frontmatter.
-awk '
-  BEGIN { in_fm = 0; past_fm = 0 }
-  NR == 1 && /^---$/ { in_fm = 1; next }
-  in_fm && /^---$/ { in_fm = 0; past_fm = 1; next }
-  in_fm { next }
-  past_fm && /[^[:space:]]/ { has_body = 1; exit }
-  !past_fm && /[^[:space:]]/ { has_body = 1; exit }
-  END { exit (has_body ? 1 : 0) }
-' "<raw-file-abs>"
+# Parse args
+ARGS="$ARGUMENTS"
+VAULT_OVERRIDE=""
+RAW_ARG=""
+set -- $ARGS
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --vault) VAULT_OVERRIDE="$2"; shift 2 ;;
+    *) RAW_ARG="${RAW_ARG:-$1}"; shift ;;
+  esac
+done
+
+# Resolve vault
+if [ -n "$VAULT_OVERRIDE" ]; then
+  VAULT="$VAULT_OVERRIDE"
+elif [ -n "${EXOMEMORY_VAULT:-}" ]; then
+  VAULT="$EXOMEMORY_VAULT"
+elif [ -n "${CLAUDE_MEMORY_VAULT:-}" ]; then
+  VAULT="$CLAUDE_MEMORY_VAULT"
+  echo "[wiki-ingest] CLAUDE_MEMORY_VAULT is deprecated, use EXOMEMORY_VAULT" >&2
+else
+  d="$(pwd)"
+  while [ "$d" != "/" ]; do
+    if [ -f "$d/WIKI.md" ]; then VAULT="$d"; break; fi
+    d="$(dirname "$d")"
+  done
+fi
+if [ -z "${VAULT:-}" ] || [ ! -f "$VAULT/WIKI.md" ]; then
+  echo "Vault not found. Set EXOMEMORY_VAULT, pass --vault <path>, or cd into a vault. Run /wiki-init <path> to create one."
+  exit 1
+fi
+
+# Resolve raw target
+if [ -z "$RAW_ARG" ]; then
+  RAW_TARGET="$VAULT/raw"
+else
+  case "$RAW_ARG" in
+    /*) RAW_TARGET="$RAW_ARG" ;;
+    *)  RAW_TARGET="$VAULT/raw/$RAW_ARG" ;;
+  esac
+  case "$RAW_TARGET" in
+    "$VAULT/raw"|"$VAULT/raw/"*) ;;
+    *) echo "raw target outside vault/raw/: $RAW_TARGET"; exit 1 ;;
+  esac
+  [ ! -e "$RAW_TARGET" ] && { echo "raw target missing: $RAW_TARGET"; exit 1; }
+fi
+
+# Preflight: classifies every raw file and batch-appends SKIP / SKIP-empty
+# lines to wiki/log.md.
+MANIFEST="/tmp/ingest-manifest-$$.ndjson"
+SUMMARY="/tmp/ingest-summary-$$.txt"
+DIRTY="/tmp/ingest-dirty-$$.ndjson"
+"${CLAUDE_PLUGIN_ROOT}/scripts/ingest-preflight.sh" "$VAULT" "$RAW_TARGET" \
+  > "$MANIFEST" 2>"$SUMMARY"
+jq -c 'select(.op == "CREATE" or .op == "UPDATE" or .op == "ERROR")' "$MANIFEST" > "$DIRTY"
+
+echo "VAULT=$VAULT"
+echo "MANIFEST=$MANIFEST"
+echo "DIRTY=$DIRTY"
+cat "$SUMMARY"
+echo "dirty_count=$(wc -l < "$DIRTY")"
 ```
 
-If empty, operation is `SKIP-empty`. Append `## [<today>] SKIP-empty | <slug>` to log.md once, and move to the next file. Do **not** create a wiki source page for it. Do not ERROR even if a stale source page happens to already exist — that case is handled by manual cleanup (future enhancement could auto-prune, but we don't do it here).
+The summary line `# preflight: total=N skip=X skip_empty=Y skip_asset=Z create=A update=B error=E dirty=D` tells the LLM whether work remains.
 
-### 5a. Compute identity
+**If `dirty_count == 0`, jump straight to Step 3 and report — no per-file LLM work needed.**
 
-Use Bash for the hash:
+## Step 2: Process dirty files (only when `dirty_count > 0`)
 
-```bash
-shasum -a 256 "<raw-file-abs>" | awk '{print $1}'
-```
+Skip this step entirely when no dirty files. Otherwise, read `WIKI.md` once for the schema (`Read /VAULT/WIKI.md`), then for each record in `$DIRTY`:
 
-Derive:
+1. Read the raw file at the record's `path`.
+2. Extract: title, summary (2-4 paragraphs), key claims, mentioned entities, mentioned concepts, contradictions vs existing wiki content.
+3. **Use the derived frontmatter the preflight record already carries** (`source_type`, `word_count`, `reading_time_min`, plus `session_id` for handover or `source_url`/`captured_at`/`captured_by`/`domain` for web-clip). Do not recompute these.
+4. Write `<VAULT>/wiki/sources/<slug>.md` (Source Page Format from WIKI.md). On **UPDATE** (record's `existing_page` set): merge frontmatter — overwrite only the derived fields above plus `title`, `tags`, `source_hash`, `last_updated`. **Preserve any other frontmatter keys the user added by hand.**
+5. For each mentioned entity / concept: CREATE if missing, MERGE (append Connection + new About paragraph) if existing.
+6. Update `<VAULT>/wiki/index.md`: append `- [[<slug>]] — <title>` under `## Sources` / `## Entities` / `## Concepts`. Do not duplicate. Never overwrite the file — preserve content above those sections (e.g. `## Activity heatmap`, `## Handover calendar`).
+7. Update `<VAULT>/wiki/overview.md`: append / light revise. **Do not rewrite from scratch.**
+8. Append to `<VAULT>/wiki/log.md`: `## [YYYY-MM-DD] CREATE | <slug>` (or `UPDATE` / `MERGE`).
 
-- `source_id` = path relative to `<VAULT>/` with `raw/` prefix stripped, POSIX-separated
-- `slug` = `source_id` with `/` → `--`, `.md` extension stripped (keep other extensions), unsafe chars replaced with `-`
-- `source_hash` = output of the shasum above
+**SKIP and SKIP-empty are already in `log.md`** — preflight wrote them in batch before Step 1 returned. Do not re-emit them.
 
-### 5b. Decide operation
+For **ERROR** records (slug collision): do not modify any file. Report to the user.
 
-Read `<VAULT>/wiki/sources/<slug>.md` if it exists.
+## Step 3: Report
 
-- Not exists → `CREATE`
-- Exists, frontmatter `source_id` matches, `source_hash` matches → `SKIP`
-- Exists, `source_id` matches, `source_hash` differs → `UPDATE`
-- Exists, `source_id` does NOT match → `ERROR` (slug collision). Report to user, do not touch, move on.
-
-### 5c. Execute
-
-For **CREATE** or **UPDATE**:
-
-1. Read the raw file
-2. Extract: title, summary (2-4 paragraphs), key claims, mentioned entities, mentioned concepts, any contradictions with existing wiki content
-3. Compute the following derived frontmatter fields (v0.4+, per WIKI.md Source page spec):
-   - `source_type` — from `source_id` prefix: `handovers/*` → `handover`, `web/*` → `web-clip`, else → `manual`
-   - `word_count` — whitespace-split tokens in the raw body (if the raw file has YAML frontmatter, strip it first)
-   - `reading_time_min` — `ceil(word_count / 200)`
-   - If `source_type == handover`: `session_id` — the raw filename without `.md` extension (matches the Claude session UUID)
-   - If `source_type == web-clip`: read the raw file's frontmatter and copy `source_url`, `captured_at`, `captured_by` into the wiki page's frontmatter; compute `domain` as the lowercased host part of `source_url`. If `captured_by` is missing from the raw (pre-v0.3 clip), write `captured_by: unknown`
-4. Write `<VAULT>/wiki/sources/<slug>.md` using the Source Page Format from WIKI.md (frontmatter with the above derived fields + the v0.3 fields `title`, `type: source`, `tags`, `source_id`, `source_hash`, `last_updated`; then body = Summary / Key Claims / Connections / Contradictions).
-   - On **UPDATE**: merge frontmatter — overwrite the derived fields above plus `title`, `tags`, `source_hash`, `last_updated`; preserve any frontmatter keys the user may have added by hand. Do not drop unknown keys.
-5. For each mentioned entity:
-   - slug = kebab-case of canonical name
-   - If `<VAULT>/wiki/entities/<slug>.md` does not exist → CREATE (About + Connections back to this source)
-   - If exists → MERGE (append new Connection line; new About info appended as paragraph, do NOT overwrite)
-6. For each mentioned concept: same pattern in `<VAULT>/wiki/concepts/`
-7. Update `<VAULT>/wiki/index.md`:
-   - Under the relevant section (Sources / Entities / Concepts), append `- [[<slug>]] — <title>` for each newly-created page. No duplicates.
-   - **Invariant (v0.5+):** Only append to `## Sources` / `## Entities` / `## Concepts`. Never overwrite the whole file — user content above those sections (e.g. the `## Activity heatmap` and `## Handover calendar` blocks that ship in the template and are inserted by `/wiki-migrate`) must be preserved.
-8. Update `<VAULT>/wiki/overview.md`: append or lightly revise. **Do not rewrite from scratch**.
-9. Append to `<VAULT>/wiki/log.md`: `## [<today>] CREATE | <slug>` (or `UPDATE` / `MERGE`). Get today's date:
-   ```bash
-   date +%Y-%m-%d
-   ```
-
-For **SKIP**: append `## [<today>] SKIP | <slug>` to log.md.
-
-For **ERROR**: do not modify any file. Report collision to user.
-
-## Step 6: Report
-
-Summarize to the user:
+Use the preflight summary for SKIP / SKIP-empty / SKIP-asset / ERROR counts. Use your own bookkeeping from Step 2 for CREATE / UPDATE / MERGE.
 
 ```
 Ingest complete.
@@ -160,6 +113,7 @@ Ingest complete.
   UPDATE: ...
   MERGE (entities/concepts): ...
   SKIP: ...
+  SKIP-empty: ...
   ERROR: ... (if any)
 
 Wiki: <VAULT>/wiki/
@@ -167,6 +121,6 @@ Wiki: <VAULT>/wiki/
 
 ## Notes
 
-- Write changes in this order per file to stay atomic: entities/concepts MERGE → index → overview → sources → log. If the sources write fails, the wiki is still in a consistent state.
-- Be conservative with entity/concept MERGE: if unsure two names refer to the same thing, prefer separate pages.
-- Trust WIKI.md. Domain-specific conventions there override this file.
+- Write order per dirty file: entities/concepts MERGE → index → overview → sources → log. If the source write fails, the wiki is still consistent.
+- Be conservative with entity / concept MERGE: when unsure two names refer to the same thing, prefer separate pages.
+- WIKI.md is the schema authority. If anything below disagrees, WIKI.md wins.
