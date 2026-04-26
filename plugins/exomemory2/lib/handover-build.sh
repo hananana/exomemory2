@@ -66,8 +66,28 @@ build_handover() {
 
   local out_md="${handover_dir}/${session_id}.md"
   local tmp_md="${handover_dir}/.${session_id}.md.tmp.$$"
-  local captured_at
-  captured_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+  # Prefer the timestamp of the first user/assistant message in the
+  # transcript so the calendar/heatmap reflect WHEN THE CONVERSATION
+  # HAPPENED, not when this handover happens to be (re)built. This matters
+  # for rescue rebuilds — without this, all rebuilt handovers cluster on
+  # the rebuild date and break the calendar layout (v0.8.0 → v0.8.2 fix).
+  # Falls back to the current time only when the transcript has no usable
+  # timestamp (older Claude Code versions that didn't emit .timestamp).
+  local captured_at captured_at_source
+  captured_at="$(
+    jq -r '
+      select((.type == "user" or .type == "assistant") and (.timestamp != null))
+      | .timestamp
+    ' "$transcript_path" 2>/dev/null | head -n 1
+  )"
+  captured_at="$(printf '%s' "$captured_at" | sed -E 's/\.[0-9]+Z?$/Z/')"
+  if [ -n "$captured_at" ]; then
+    captured_at_source="transcript-first-message"
+  else
+    captured_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    captured_at_source="fallback-now"
+  fi
 
   # Extract conversation text. Filter to type=="text" to drop tool_use /
   # tool_result. Skip messages that yield no text so handovers do not get
@@ -105,6 +125,7 @@ build_handover() {
     printf 'session_id: "%s"\n' "$session_id"
     printf 'last_trigger: "%s"\n' "$trigger"
     printf 'last_captured_at: "%s"\n' "$captured_at"
+    printf 'captured_at_source: "%s"\n' "$captured_at_source"
     printf -- '---\n\n'
     printf '%s\n' "$body"
   } > "$tmp_md" || { rm -f "$tmp_md"; return 2; }

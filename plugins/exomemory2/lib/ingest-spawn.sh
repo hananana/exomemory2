@@ -212,7 +212,10 @@ ingest_spawn() {
         echo "[exomemory2] ingest: last $((NOW - LAST))s ago < interval $AUTO_INGEST_INTERVAL_SEC, skipping" >&2
       fi
     fi
-    if [ "$threshold_ok" = "1" ] && [ "$interval_ok" = "1" ]; then
+    # bypass_threshold=1 means "ignore the count threshold", NOT "run even
+    # when there is nothing to ingest". DIRTY=0 means the LLM has nothing to
+    # do — spawning would just burn a `claude -p` startup for a no-op.
+    if [ "$DIRTY" -gt 0 ] && [ "$threshold_ok" = "1" ] && [ "$interval_ok" = "1" ]; then
       should_ingest=1
     fi
   fi

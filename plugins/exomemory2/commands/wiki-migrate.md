@@ -496,6 +496,84 @@ echo "index.md:"
 echo "$index_status" | sed 's/^/  /'
 ```
 
+## Step 9.5: Install Calendar CSS snippet (v0.8.2+)
+
+Place the bundled CSS snippet in the vault's `.obsidian/snippets/` directory and ensure it is enabled in `appearance.json`. The snippet caps the Handover calendar's day cell height so dense days don't push the monthly grid out of alignment.
+
+Idempotent: re-running this step on a vault that already has the snippet does not duplicate-write or duplicate-enable.
+
+```bash
+snippet_count=0
+snippet_msg="up-to-date"
+if [ "$DRY_RUN" = "0" ]; then
+  src="${TEMPLATE_DIR}/.obsidian/snippets/exomemory2-calendar.css"
+  dst_dir="${VAULT}/.obsidian/snippets"
+  dst="${dst_dir}/exomemory2-calendar.css"
+  appearance="${VAULT}/.obsidian/appearance.json"
+  if [ -f "$src" ]; then
+    mkdir -p "$dst_dir"
+    if [ ! -f "$dst" ] || ! cmp -s "$src" "$dst"; then
+      cp "$src" "$dst"
+      snippet_count=1
+      snippet_msg="installed/updated"
+    fi
+    # Ensure enabledCssSnippets includes "exomemory2-calendar".
+    if [ -f "$appearance" ]; then
+      cp "$appearance" "${appearance}.bak"
+      jq --arg s "exomemory2-calendar" \
+        '.enabledCssSnippets = ((.enabledCssSnippets // []) + [$s] | unique)' \
+        "$appearance" > "${appearance}.tmp" && mv "${appearance}.tmp" "$appearance"
+    else
+      mkdir -p "$(dirname "$appearance")"
+      printf '{\n  "enabledCssSnippets": ["exomemory2-calendar"]\n}\n' > "$appearance"
+    fi
+  else
+    snippet_msg="template snippet missing (skipped)"
+  fi
+fi
+echo "calendar snippet: $snippet_msg"
+```
+
+## Step 9.6: Backfill `last_captured_at` for pre-v0.8.2 handovers
+
+Before v0.8.2, `handover-build.sh` set `last_captured_at` to the current UTC time, which caused all rebuilt handovers to cluster on a single day in the calendar after an orphan rescue run. v0.8.2 onwards reads the timestamp from the transcript's first message and tags the handover with `captured_at_source: "transcript-first-message"`.
+
+This step rewrites any handover lacking that tag, **only when** the source transcript still has a usable timestamp. Idempotent (already-tagged handovers are skipped; transcripts without timestamps are skipped to avoid `fallback-now` thrashing).
+
+```bash
+backfill_done=0
+backfill_skipped_current=0
+backfill_skipped_no_transcript=0
+backfill_skipped_no_timestamp=0
+
+if [ "$DRY_RUN" = "0" ]; then
+  # shellcheck disable=SC1091
+  source "${CLAUDE_PLUGIN_ROOT}/lib/handover-build.sh"
+  for f in "$VAULT/raw/handovers/"*.md; do
+    [ -f "$f" ] || continue
+    if grep -q '^captured_at_source: "transcript-first-message"$' "$f"; then
+      backfill_skipped_current=$((backfill_skipped_current + 1))
+      continue
+    fi
+    sid="$(basename "$f" .md)"
+    transcript="$(find "$HOME/.claude/projects" -maxdepth 4 -type f -name "${sid}.jsonl" -not -path '*/subagents/*' -print -quit 2>/dev/null)"
+    if [ -z "$transcript" ]; then
+      backfill_skipped_no_transcript=$((backfill_skipped_no_transcript + 1))
+      continue
+    fi
+    ts="$(jq -r 'select((.type == "user" or .type == "assistant") and (.timestamp != null)) | .timestamp' "$transcript" 2>/dev/null | head -n 1)"
+    if [ -z "$ts" ]; then
+      backfill_skipped_no_timestamp=$((backfill_skipped_no_timestamp + 1))
+      continue
+    fi
+    if build_handover "$VAULT" "$transcript" "$sid" "wiki-migrate-backfill"; then
+      backfill_done=$((backfill_done + 1))
+    fi
+  done
+fi
+echo "captured_at backfill: done=$backfill_done already=$backfill_skipped_current no-transcript=$backfill_skipped_no_transcript no-ts=$backfill_skipped_no_timestamp"
+```
+
 ## Step 10: Log and summarize
 
 Append a single summary line to `<VAULT>/wiki/log.md` (skipped in `--dry-run`):
@@ -504,8 +582,8 @@ Append a single summary line to `<VAULT>/wiki/log.md` (skipped in `--dry-run`):
 if [ "$DRY_RUN" = "0" ]; then
   today=$(date +%Y-%m-%d)
   mkdir -p "$VAULT/wiki"
-  printf '\n## [%s] MIGRATE | processed=%d, changed=%d, orphan=%d, error=%d, index_updated=%d\n' \
-    "$today" "$processed" "$changed" "$orphan" "$error" "$index_updated" >> "$VAULT/wiki/log.md"
+  printf '\n## [%s] MIGRATE | processed=%d, changed=%d, orphan=%d, error=%d, index_updated=%d, snippet=%d, backfill=%d\n' \
+    "$today" "$processed" "$changed" "$orphan" "$error" "$index_updated" "$snippet_count" "$backfill_done" >> "$VAULT/wiki/log.md"
 fi
 
 cat <<EOF
@@ -515,6 +593,8 @@ Migration complete.
   Orphan:    $orphan (wiki page exists but raw file missing — logged as MIGRATE-ORPHAN)
   Error:     $error (frontmatter parse failure — logged as MIGRATE-ERROR)
   Index:     updated=$index_updated
+  Calendar snippet: $snippet_msg
+  Captured_at backfill: $backfill_done handovers (skipped: $backfill_skipped_current already-current, $backfill_skipped_no_transcript no-transcript, $backfill_skipped_no_timestamp no-timestamp)
 EOF
 ```
 

@@ -29,7 +29,7 @@ v0.5 では `wiki/index.md` の冒頭に **GitHub 草風の年間アクティビ
 
 v0.6 では heatmap の直下に **Dataview `CALENDAR` による月ビュー**を追加。Claude との会話セッション（handover）の capture 日別密度が見える。追加プラグインは不要（Dataview 標準機能）、DataviewJS も不要。軸は `raw/handovers/*.md` の `last_captured_at` を使うので、再 ingest や page 編集では動かない。
 
-v0.8 では **SessionStart orphan rescue** が入った。tmux の `prefix + x` のように Claude Code が SIGHUP で即死するケース（SessionEnd hook が走らない）でも、次のセッション起動時に未 handover の transcript と滞留した clip queue を自動検出してバックグラウンドで取り込む。`prefix + x` を含めた閉じ方ぜんぶに対して、handover 化と ingest が漏れなく走るようになった。v0.8.1 では rescue/auto-ingest が **`INGEST_BATCH_SIZE`（既定 10）で 1 回あたりの取り込みを上限制限**するようになり、初回大量取り込みや大量 dirty 蓄積時にも 1 invocation が hang しないようになった（subagent 結果による成否誤判定の修正も併せて入っている）。
+v0.8 では **SessionStart orphan rescue** が入った。tmux の `prefix + x` のように Claude Code が SIGHUP で即死するケース（SessionEnd hook が走らない）でも、次のセッション起動時に未 handover の transcript と滞留した clip queue を自動検出してバックグラウンドで取り込む。`prefix + x` を含めた閉じ方ぜんぶに対して、handover 化と ingest が漏れなく走るようになった。v0.8.1 では rescue/auto-ingest が **`INGEST_BATCH_SIZE`（既定 10）で 1 回あたりの取り込みを上限制限**するようになり、初回大量取り込みや大量 dirty 蓄積時にも 1 invocation が hang しないようになった（subagent 結果による成否誤判定の修正も併せて入っている）。v0.8.2 では handover の `last_captured_at` を transcript の最初メッセージ時刻から取るようにして rescue rebuild 時の日付集中を解消、`dirty=0` のときに ingest が無駄に spawn する副次バグを修正、Handover calendar の過密日でレイアウトが崩れる問題を CSS snippet で抑える対策を入れた。`/wiki-migrate` を 1 回実行すると過去の handover の captured_at を会話時刻に backfill する。
 
 手動の `/wiki-ingest` / `/wiki-query` コマンドも提供するが、これは補助的な位置づけ — 外部ソース（論文など）を `raw/` に投入して明示的に取り込んだり、蓄積された wiki に直接問い合わせたい時のためのもの。
 

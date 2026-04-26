@@ -1,0 +1,33 @@
+/* exomemory2 — keep the Handover calendar from blowing up its row height.
+ *
+ * Dataview's CALENDAR query (Svelte component, scoped class .svelte-XXXXXXX)
+ * renders one dot per page on each day cell, with no built-in cap. A day
+ * with dozens of handovers — typical right after an orphan rescue rebuild —
+ * overflows the cell and pushes the next week's row down, breaking the
+ * monthly grid.
+ *
+ * We bound .day cells to a uniform height and clip the dot row.
+ *
+ * Note on counts: the exact daily handover count is not visible inside a
+ * clipped cell. Use the Activity heatmap section above the calendar (rendered
+ * by Contribution Graph, not Dataview) for precise per-day numbers.
+ *
+ * Note on selectors: Dataview's calendar markup uses Svelte-scoped class
+ * names like .day.svelte-q3wqg9 / .filled.svelte-1widvzq. The hash changes
+ * with Dataview versions, so we anchor on the unscoped base classes (.day)
+ * which stay stable. The .markdown-rendered prefix limits the rule to
+ * Reading view / preview output, avoiding clashes with anything else in
+ * the Obsidian UI that happens to share these class names.
+ */
+
+.markdown-rendered .day {
+  min-height: 4em;
+  max-height: 5em;
+  overflow: hidden;
+}
+
+.markdown-rendered .day > svg,
+.markdown-rendered .day .dots {
+  max-height: 2em;
+  overflow: hidden;
+}

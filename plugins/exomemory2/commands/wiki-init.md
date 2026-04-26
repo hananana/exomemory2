@@ -69,7 +69,7 @@ ls -la "<VAULT_ABS>/raw"
 test -f "<VAULT_ABS>/WIKI.md" && echo "WIKI.md: OK" || echo "WIKI.md: MISSING"
 ```
 
-Confirm the tree contains `WIKI.md`, `raw/` (with `handovers/`), `wiki/` (with `index.md`, `log.md`, `overview.md`, `sources/`, `entities/`, `concepts/`), and `.obsidian/` (with `app.json`, `appearance.json`, `core-plugins.json`, `graph.json`).
+Confirm the tree contains `WIKI.md`, `raw/` (with `handovers/`), `wiki/` (with `index.md`, `log.md`, `overview.md`, `sources/`, `entities/`, `concepts/`), and `.obsidian/` (with `app.json`, `appearance.json`, `core-plugins.json`, `graph.json`, `snippets/exomemory2-calendar.css`).
 
 ## Step 4.5: Detect Obsidian
 
@@ -136,4 +136,10 @@ Finally, always append:
 Automatic capture of Claude conversations kicks in once
 $EXOMEMORY_VAULT is set. PreCompact and SessionEnd hooks write
 handover files to <VAULT_ABS>/raw/handovers/<session-id>.md.
+
+The bundled CSS snippet `exomemory2-calendar` is pre-enabled in the
+vault (.obsidian/snippets/ + .obsidian/appearance.json). It caps the
+Handover calendar's day cell height so dense days (e.g. after an orphan
+rescue rebuild) don't push the monthly grid out of alignment. Verify in
+Obsidian → Settings → Appearance → CSS snippets if needed.
 ```
