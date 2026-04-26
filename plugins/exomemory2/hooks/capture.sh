@@ -197,35 +197,39 @@ load_config() {
   done < "$config"
 }
 
-# Count handovers in raw/ that are not yet ingested or have changed.
-count_dirty_handovers() {
+# Count dirty raw files (CREATE + UPDATE) across the entire raw/ tree.
+# Delegates to ingest-preflight.sh --count-only, which:
+#   - covers all source types (handovers AND web clips, not just handovers)
+#   - runs in ~1s for ~50 files (Bash + awk + shasum, no LLM)
+#   - emits no side effects (skips the SKIP / SKIP-empty log.md append)
+# Returns the integer dirty count on stdout (0 on any error).
+count_dirty_files() {
   local vault="$1"
-  local handovers_dir="$vault/raw/handovers"
-  local sources_dir="$vault/wiki/sources"
-  local count=0
-  [ -d "$handovers_dir" ] || { echo 0; return; }
-  for raw_file in "$handovers_dir"/*.md; do
-    [ -f "$raw_file" ] || continue
-    local basename slug wiki_page stored_hash current_hash
-    basename=$(basename "$raw_file")
-    slug="handovers--${basename%.md}"
-    wiki_page="$sources_dir/$slug.md"
-    if [ ! -f "$wiki_page" ]; then
-      count=$((count + 1))
-      continue
-    fi
-    stored_hash=$(awk '
-      /^---$/ { in_fm = !in_fm; next }
-      in_fm && /^source_hash:/ {
-        val = $2; gsub(/^"|"$/, "", val); sub(/^sha256:/, "", val); print val; exit
-      }
-    ' "$wiki_page")
-    current_hash=$(shasum -a 256 "$raw_file" | awk '{print $1}')
-    if [ "$stored_hash" != "$current_hash" ]; then
-      count=$((count + 1))
-    fi
-  done
-  echo "$count"
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local preflight="$script_dir/../scripts/ingest-preflight.sh"
+  if [ ! -x "$preflight" ]; then
+    echo "[exomemory2] preflight script missing: $preflight" >&2
+    echo 0
+    return
+  fi
+  # The summary line goes to stderr; capture stderr only.
+  local summary
+  summary=$("$preflight" --count-only "$vault" 2>&1 1>/dev/null) || {
+    echo "[exomemory2] preflight failed: $summary" >&2
+    echo 0
+    return
+  }
+  # Extract `dirty=N` from `# preflight: ... dirty=N`.
+  local n
+  n=$(printf '%s' "$summary" | awk '
+    match($0, /dirty=[0-9]+/) {
+      val = substr($0, RSTART + 6, RLENGTH - 6)
+      print val + 0
+      exit
+    }
+  ')
+  echo "${n:-0}"
 }
 
 # Capture the current subshell's PID into MY_PID (set as a side effect).
@@ -282,7 +286,7 @@ fi
 
 should_ingest=0
 if [ "$AUTO_INGEST" = "1" ]; then
-  DIRTY=$(count_dirty_handovers "$VAULT")
+  DIRTY=$(count_dirty_files "$VAULT")
   if [ "$DIRTY" -ge "$AUTO_INGEST_THRESHOLD" ]; then
     ingest_interval_ok=1
     if [ -f "$VAULT/.last-ingest" ]; then

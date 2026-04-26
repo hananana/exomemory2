@@ -3,7 +3,7 @@
 # so the LLM never has to read a file just to decide SKIP.
 #
 # Usage:
-#   ingest-preflight.sh <VAULT> [<RAW_TARGET>]
+#   ingest-preflight.sh [--count-only] <VAULT> [<RAW_TARGET>]
 #
 # Outputs:
 #   - NDJSON to stdout, one record per raw file (excluding raw/assets/*).
@@ -13,12 +13,24 @@
 #   - Appends `## [<today>] SKIP | <slug>` and `## [<today>] SKIP-empty | <slug>`
 #     lines to <VAULT>/wiki/log.md in a single batched write per run.
 #
+# `--count-only`:
+#   - Suppresses the log.md side effect (no SKIP / SKIP-empty lines written).
+#   - Suppresses the NDJSON stdout (only the `# preflight:` summary line on stderr).
+#   - Use this from capture.sh to cheaply ask "is anything dirty?" without
+#     polluting log.md on every SessionEnd hook fire.
+#
 # Dependencies: bash, awk, shasum, find, jq.
 # (jq is already a hard dependency of plugins/exomemory2/hooks/capture.sh.)
 
 set -euo pipefail
 
-VAULT="${1:?usage: $0 <VAULT> [<RAW_TARGET>]}"
+COUNT_ONLY=0
+if [ "${1:-}" = "--count-only" ]; then
+  COUNT_ONLY=1
+  shift
+fi
+
+VAULT="${1:?usage: $0 [--count-only] <VAULT> [<RAW_TARGET>]}"
 RAW_TARGET="${2:-$VAULT/raw}"
 
 [ -d "$VAULT" ] || { echo "[preflight] vault not found: $VAULT" >&2; exit 2; }
@@ -134,6 +146,8 @@ make_slug() {
 
 emit_record() {
   # All args forwarded as `--arg k v` pairs to jq; final arg is filter.
+  # Suppressed in --count-only mode (we only care about the summary).
+  [ "$COUNT_ONLY" = "1" ] && return 0
   jq -nc "$@"
 }
 
@@ -299,7 +313,9 @@ else
 fi
 
 # Batch append SKIP / SKIP-empty lines once.
-if [ -s "$SKIP_LOG_TMP" ]; then
+# In --count-only mode we suppress this side effect — capture.sh checks dirty
+# count on every SessionEnd and we do not want to grow log.md on every fire.
+if [ "$COUNT_ONLY" != "1" ] && [ -s "$SKIP_LOG_TMP" ]; then
   cat "$SKIP_LOG_TMP" >> "$LOG_FILE"
 fi
 
