@@ -1,6 +1,6 @@
 ---
 description: Ingest raw sources into the wiki (CREATE/UPDATE/SKIP with dedup)
-argument-hint: "[<raw-file-or-dir>] [--vault <path>]"
+argument-hint: "[<raw-file-or-dir>] [--vault <path>] [--limit <N>]"
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
@@ -23,10 +23,12 @@ Resolve `VAULT` (priority: `--vault` arg → `EXOMEMORY_VAULT` env → ancestor 
 ARGS="$ARGUMENTS"
 VAULT_OVERRIDE=""
 RAW_ARG=""
+LIMIT=""
 set -- $ARGS
 while [ $# -gt 0 ]; do
   case "$1" in
     --vault) VAULT_OVERRIDE="$2"; shift 2 ;;
+    --limit) LIMIT="$2"; shift 2 ;;
     *) RAW_ARG="${RAW_ARG:-$1}"; shift ;;
   esac
 done
@@ -73,13 +75,35 @@ SUMMARY="/tmp/ingest-summary-$$.txt"
 DIRTY="/tmp/ingest-dirty-$$.ndjson"
 "${CLAUDE_PLUGIN_ROOT}/scripts/ingest-preflight.sh" "$VAULT" "$RAW_TARGET" \
   > "$MANIFEST" 2>"$SUMMARY"
-jq -c 'select(.op == "CREATE" or .op == "UPDATE" or .op == "ERROR")' "$MANIFEST" > "$DIRTY"
+
+# DIRTY: only the work the LLM has to do (CREATE/UPDATE).
+# ERROR records (slug collisions) are tallied below and reported in Step 3
+# without going through the per-file LLM loop — they require human triage,
+# not generation. Keeping ERROR out of DIRTY also prevents starvation when
+# --limit is used (otherwise stuck ERROR rows at the head of the list would
+# block CREATE/UPDATE forever).
+jq -c 'select(.op == "CREATE" or .op == "UPDATE")' "$MANIFEST" > "$DIRTY"
+
+# Apply --limit to CREATE/UPDATE only. The whole point of --limit is to keep
+# a single invocation small enough to terminate; ERROR is unaffected.
+if [ -n "${LIMIT:-}" ] && [ "$LIMIT" -gt 0 ]; then
+  full_work=$(awk 'END{print NR}' "$DIRTY")
+  head -n "$LIMIT" "$DIRTY" > "$DIRTY.tmp" && mv "$DIRTY.tmp" "$DIRTY"
+  kept=$(awk 'END{print NR}' "$DIRTY")
+  echo "limited_to=$LIMIT (full_work=$full_work, deferred=$((full_work - kept)))"
+fi
+
+# ERROR tally for Step 3 (no LLM work).
+ERROR_COUNT=$(jq -c 'select(.op == "ERROR")' "$MANIFEST" | awk 'END{print NR}')
+ERROR_SLUGS=$(jq -r 'select(.op == "ERROR") | .slug' "$MANIFEST" | paste -sd, -)
 
 echo "VAULT=$VAULT"
 echo "MANIFEST=$MANIFEST"
 echo "DIRTY=$DIRTY"
 cat "$SUMMARY"
-echo "dirty_count=$(wc -l < "$DIRTY")"
+echo "dirty_count=$(awk 'END{print NR}' "$DIRTY")"
+echo "error_count=$ERROR_COUNT"
+echo "error_slugs=$ERROR_SLUGS"
 ```
 
 The summary line `# preflight: total=N skip=X skip_empty=Y skip_asset=Z create=A update=B error=E dirty=D` tells the LLM whether work remains.
@@ -101,11 +125,11 @@ Skip this step entirely when no dirty files. Otherwise, read `WIKI.md` once for 
 
 **SKIP and SKIP-empty are already in `log.md`** — preflight wrote them in batch before Step 1 returned. Do not re-emit them.
 
-For **ERROR** records (slug collision): do not modify any file. Report to the user.
+**ERROR records are not in `$DIRTY`.** They were tallied in Step 1 (`error_count` / `error_slugs` from the Bash output) and are reported in Step 3 as-is. ERROR means slug collision — distinct raw paths produced the same wiki slug — which requires human triage (rename one of the source files), not LLM action. Do not attempt to resolve them here.
 
 ## Step 3: Report
 
-Use the preflight summary for SKIP / SKIP-empty / SKIP-asset / ERROR counts. Use your own bookkeeping from Step 2 for CREATE / UPDATE / MERGE.
+Use the preflight summary for SKIP / SKIP-empty / SKIP-asset counts. Use the Bash output's `error_count` / `error_slugs` for ERROR. Use your own bookkeeping from Step 2 for CREATE / UPDATE / MERGE. If the Step 1 Bash output included a `limited_to=...` line, mention how many records were deferred to the next run.
 
 ```
 Ingest complete.
@@ -114,7 +138,8 @@ Ingest complete.
   MERGE (entities/concepts): ...
   SKIP: ...
   SKIP-empty: ...
-  ERROR: ... (if any)
+  ERROR: <error_count> (slug collisions: <error_slugs>) (if error_count > 0)
+  DEFERRED: <deferred> (next run will pick these up) (if --limit kicked in)
 
 Wiki: <VAULT>/wiki/
 ```

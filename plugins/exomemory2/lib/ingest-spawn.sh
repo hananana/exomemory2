@@ -45,6 +45,7 @@ _load_exomem_config() {
   AUTO_INGEST_THRESHOLD=3
   AUTO_INGEST_INTERVAL_SEC=1800
   AUTO_CLIP=1
+  INGEST_BATCH_SIZE=10
   [ -f "$config" ] || return 0
   local line key val
   while IFS= read -r line || [ -n "$line" ]; do
@@ -59,6 +60,7 @@ _load_exomem_config() {
         AUTO_INGEST_THRESHOLD) AUTO_INGEST_THRESHOLD="$val" ;;
         AUTO_INGEST_INTERVAL_SEC) AUTO_INGEST_INTERVAL_SEC="$val" ;;
         AUTO_CLIP) AUTO_CLIP="$val" ;;
+        INGEST_BATCH_SIZE) INGEST_BATCH_SIZE="$val" ;;
       esac
     fi
   done < "$config"
@@ -127,16 +129,35 @@ _acquire_lock() {
 
 # Decide success from a stream-json log file: exit-zero is necessary but not
 # sufficient — `claude -p` can return 0 while the run aborted. The
-# authoritative signal is the final {"type":"result", "is_error": <bool>}.
-# Returns 0 (success) iff that record exists with is_error == false.
+# authoritative signal is the final {"type":"result","is_error":<bool>}
+# record **for the main invocation's session_id**.
+#
+# Why filter on session_id: stream-json mixes the main session's records with
+# subagent records (each Task / parallel sub-invocation also emits its own
+# init / result). Subagent results can arrive after the main result, so a
+# naive `grep ... | tail -n 1` picks up the wrong one and misclassifies a
+# successful run as failed (observed in v0.8.0 when /wiki-clip --batch
+# spawned parallel subagents). The first {"type":"system","subtype":"init"}
+# always belongs to the main invocation.
 _is_success() {
   local f="$1"
   [ -s "$f" ] || return 1
+  local main_sid
+  main_sid=$(grep -m 1 '"type":"system","subtype":"init"' "$f" 2>/dev/null \
+             | jq -r '.session_id // empty' 2>/dev/null)
+  [ -z "$main_sid" ] && return 1
   local last_result
-  last_result=$(grep -E '"type":"result"' "$f" 2>/dev/null | tail -n 1)
+  last_result=$(grep '"type":"result"' "$f" 2>/dev/null \
+                | jq -c --arg sid "$main_sid" 'select(.session_id == $sid)' 2>/dev/null \
+                | tail -n 1)
   [ -z "$last_result" ] && return 1
   local is_error
-  is_error=$(printf '%s' "$last_result" | jq -r '.is_error // true' 2>/dev/null)
+  # Do NOT use `.is_error // true` — jq's `//` treats boolean false as falsy
+  # too, so `false // true` evaluates to true and would mark every successful
+  # run as failed (this was the v0.8.0 "clip FAILED rc=0" bug). Read the raw
+  # value and compare to the string "false". Anything else (true, null,
+  # missing, parse error) is treated as failure — conservative by design.
+  is_error=$(printf '%s' "$last_result" | jq -r '.is_error' 2>/dev/null)
   [ "$is_error" = "false" ]
 }
 
@@ -149,7 +170,7 @@ ingest_spawn() {
     return 0
   fi
 
-  local AUTO_INGEST AUTO_INGEST_THRESHOLD AUTO_INGEST_INTERVAL_SEC AUTO_CLIP
+  local AUTO_INGEST AUTO_INGEST_THRESHOLD AUTO_INGEST_INTERVAL_SEC AUTO_CLIP INGEST_BATCH_SIZE
   _load_exomem_config "$vault/.exomemory-config"
 
   # ---- has_queue: merge listed queue files into a deduped temp ----
@@ -263,9 +284,18 @@ ingest_spawn() {
 
     # Phase 2: wiki-ingest (if dirty/bypass and interval allow).
     if [ "$should_ingest" = "1" ]; then
+      # Cap LLM workload per invocation. INGEST_BATCH_SIZE=0 disables the cap.
+      local ingest_content="/exomemory2:wiki-ingest"
+      if [ "$INGEST_BATCH_SIZE" -gt 0 ]; then
+        ingest_content="$ingest_content --limit $INGEST_BATCH_SIZE"
+      fi
+      local ingest_msg
+      ingest_msg=$(jq -nc --arg c "$ingest_content" \
+        '{type:"user", message:{role:"user", content:$c}}')
+
       local tmp_out
       tmp_out=$(mktemp -t exomem-ingest-XXXX)
-      printf '%s\n' '{"type":"user","message":{"role":"user","content":"/exomemory2:wiki-ingest"}}' | \
+      printf '%s\n' "$ingest_msg" | \
         EXOMEMORY_VAULT="$vault" nohup claude -p \
           --input-format stream-json \
           --output-format stream-json \
