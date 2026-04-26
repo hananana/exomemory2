@@ -1,7 +1,7 @@
 ---
 description: Ingest raw sources into the wiki (CREATE/UPDATE/SKIP with dedup)
 argument-hint: "[<raw-file-or-dir>] [--vault <path>]"
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task
 ---
 
 # /wiki-ingest
@@ -88,16 +88,72 @@ The summary line `# preflight: total=N skip=X skip_empty=Y skip_asset=Z create=A
 
 ## Step 2: Process dirty files (only when `dirty_count > 0`)
 
-Skip this step entirely when no dirty files. Otherwise, read `WIKI.md` once for the schema (`Read /VAULT/WIKI.md`), then for each record in `$DIRTY`:
+Skip this step entirely when no dirty files. Otherwise read `WIKI.md` once (`Read $VAULT/WIKI.md`) for the schema, then proceed.
 
-1. Read the raw file at the record's `path`.
-2. Extract: title, summary (2-4 paragraphs), key claims, mentioned entities, mentioned concepts, contradictions vs existing wiki content.
-3. **Use the derived frontmatter the preflight record already carries** (`source_type`, `word_count`, `reading_time_min`, plus `session_id` for handover or `source_url`/`captured_at`/`captured_by`/`domain` for web-clip). Do not recompute these.
-4. Write `<VAULT>/wiki/sources/<slug>.md` (Source Page Format from WIKI.md). On **UPDATE** (record's `existing_page` set): merge frontmatter — overwrite only the derived fields above plus `title`, `tags`, `source_hash`, `last_updated`. **Preserve any other frontmatter keys the user added by hand.**
-5. For each mentioned entity / concept: CREATE if missing, MERGE (append Connection + new About paragraph) if existing.
-6. Update `<VAULT>/wiki/index.md`: append `- [[<slug>]] — <title>` under `## Sources` / `## Entities` / `## Concepts`. Do not duplicate. Never overwrite the file — preserve content above those sections (e.g. `## Activity heatmap`, `## Handover calendar`).
-7. Update `<VAULT>/wiki/overview.md`: append / light revise. **Do not rewrite from scratch.**
-8. Append to `<VAULT>/wiki/log.md`: `## [YYYY-MM-DD] CREATE | <slug>` (or `UPDATE` / `MERGE`).
+### Step 2.1: Extract content (parallel subagents when `dirty_count >= 2`)
+
+Extraction (raw read → structured fields) is **read-only** — the per-file work has no shared state. Parallelize it via subagents to avoid serial LLM round-trips per dirty file.
+
+- **`dirty_count == 1`**: inline the extraction in the main context. The single subagent overhead would not pay off.
+- **`dirty_count >= 2`**: in **one** assistant message, invoke `Task` (`subagent_type=general-purpose`) **once per dirty record**, in parallel. Each subagent is given the prompt template below filled in with the record's fields, and returns ONE JSON object on stdout.
+
+Subagent prompt template (substitute `<...>`):
+
+```
+Extract structured wiki content from a single raw source for /wiki-ingest.
+
+Inputs:
+- raw_path: <path>
+- existing_wiki_page: <existing_page or "">  # set on UPDATE, empty on CREATE
+- vault_wiki_dir: <VAULT>/wiki  # for cross-checking entities/concepts that already exist
+
+Steps:
+1. Read raw_path.
+2. If existing_wiki_page is set, read it to understand prior summary/connections (so the extraction is a coherent UPDATE, not a from-scratch overwrite).
+3. (Optional) Glob/Read entities/concepts dirs sparingly to avoid duplicate slugs for entities that already exist under a different surface form.
+4. Extract and return ONE JSON object on stdout, no prose, no code fences:
+   {
+     "title": "...",
+     "summary": "...",                  // 2-4 paragraphs, plain Markdown
+     "key_claims": ["...", "..."],      // bullets
+     "entities": [
+       {"name": "...", "slug": "...", "about": "...", "connection_note": "..."},
+       ...
+     ],
+     "concepts": [
+       {"name": "...", "slug": "...", "about": "...", "connection_note": "..."},
+       ...
+     ],
+     "contradictions": "None or text",
+     "tags": ["...", "..."]
+   }
+
+You MUST NOT write any file. You MUST NOT update index.md, log.md, overview.md, sources/, entities/, concepts/. Only Read and return JSON.
+```
+
+If a subagent returns malformed JSON, fall back to inline extraction for that one file in the main context. Do not retry the subagent.
+
+### Step 2.2: Write source pages and MERGE entities / concepts (main context)
+
+Aggregate the extraction results. For each dirty record paired with its extraction:
+
+1. Build the source page frontmatter: `title`, `type: source`, `tags` (from extraction), `source_id`, `source_hash`, `last_updated` (today), plus all derived fields the preflight record already provides (`source_type`, `word_count`, `reading_time_min`, `session_id` for handover, `source_url` / `captured_at` / `captured_by` / `domain` for web-clip).
+2. Build the body: `## Summary` (extraction.summary) + `## Key Claims` (bullets from extraction.key_claims) + `## Connections` (`- [[<slug>]] — <connection_note>` for each entity / concept) + `## Contradictions` (extraction.contradictions).
+3. Write `$VAULT/wiki/sources/<slug>.md`:
+   - **CREATE**: write the full file fresh.
+   - **UPDATE** (record's `existing_page` set): merge frontmatter — overwrite ONLY the derived fields above plus `title`, `tags`, `source_hash`, `last_updated`. **Preserve any other frontmatter keys the user added by hand.** Then replace the body wholesale (Summary/Key Claims/Connections/Contradictions are LLM-owned).
+
+4. Aggregate entities and concepts across all dirty files (dedupe by slug). For each unique entity / concept:
+   - If `$VAULT/wiki/entities/<slug>.md` (or `concepts/`) does not exist → CREATE with `## About` (the union of `about` strings from sources that mention it) and `## Connections` (one line per source that mentions it, `- [[<source-slug>]] — <connection_note>`).
+   - If exists → MERGE: append the new Connection line(s); if the new About info is genuinely new (not already covered), append as a new paragraph. **Never overwrite existing About.**
+
+### Step 2.3: Bookkeeping (main context, batched)
+
+After all per-file writes are done:
+
+1. **`$VAULT/wiki/index.md`**: in a single Edit, insert all new source / entity / concept entries under `## Sources` / `## Entities` / `## Concepts`. Format: `- [[<slug>]] — <title>`. Do not duplicate existing entries. **Never overwrite the file** — preserve content above those sections (e.g. `## Activity heatmap`, `## Handover calendar`).
+2. **`$VAULT/wiki/overview.md`**: append / light revise. **Do not rewrite from scratch.** Skip if no material change.
+3. **`$VAULT/wiki/log.md`**: append all CREATE / UPDATE / MERGE lines in one Bash `printf … >>` call. Format: `## [YYYY-MM-DD] CREATE | <slug>` (or `UPDATE` / `MERGE`). One line per affected page.
 
 **SKIP and SKIP-empty are already in `log.md`** — preflight wrote them in batch before Step 1 returned. Do not re-emit them.
 
