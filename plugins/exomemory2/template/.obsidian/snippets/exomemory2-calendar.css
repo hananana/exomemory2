@@ -1,33 +1,71 @@
 /* exomemory2 — keep the Handover calendar from blowing up its row height.
  *
- * Dataview's CALENDAR query (Svelte component, scoped class .svelte-XXXXXXX)
- * renders one dot per page on each day cell, with no built-in cap. A day
- * with dozens of handovers — typical right after an orphan rescue rebuild —
- * overflows the cell and pushes the next week's row down, breaking the
- * monthly grid.
+ * Dataview's CALENDAR puts each .day inside a plain <td>. Capping just .day
+ * doesn't work because the table cell is sized by its content's natural
+ * height — overflow:hidden on .day clips the visual but TD still measures
+ * the unclipped layout, so the row grows anyway.
  *
- * We bound .day cells to a uniform height and clip the dot row.
+ * v0.8.3 cap: also clamp the table cells (td/tr) and the dot row container.
  *
- * Note on counts: the exact daily handover count is not visible inside a
- * clipped cell. Use the Activity heatmap section above the calendar (rendered
- * by Contribution Graph, not Dataview) for precise per-day numbers.
+ * Confirmed Dataview CALENDAR DOM (2026-04, Dataview 0.5.x):
+ *   div.block-language-dataview
+ *     div.container.svelte-pcimu8
+ *       table.calendar.svelte-pcimu8
+ *         tbody > tr > td
+ *           div.day.svelte-q3wqg9
+ *             "26 "
+ *             div.dot-container.svelte-q3wqg9
+ *               svg.dot.filled.note.svelte-1widvzq * N
  *
- * Note on selectors: Dataview's calendar markup uses Svelte-scoped class
- * names like .day.svelte-q3wqg9 / .filled.svelte-1widvzq. The hash changes
- * with Dataview versions, so we anchor on the unscoped base classes (.day)
- * which stay stable. The .markdown-rendered prefix limits the rule to
- * Reading view / preview output, avoiding clashes with anything else in
- * the Obsidian UI that happens to share these class names.
+ * Note on counts: dense days have their dot row clipped. For exact daily
+ * handover counts, see the Activity heatmap above (Contribution Graph).
  */
 
-.markdown-rendered .day {
-  min-height: 4em;
-  max-height: 5em;
-  overflow: hidden;
+/* Lock cell widths via fixed table layout so cells can't grow with content. */
+.markdown-rendered table.calendar {
+  table-layout: fixed !important;
+  width: 100% !important;
 }
 
-.markdown-rendered .day > svg,
-.markdown-rendered .day .dots {
-  max-height: 2em;
+.markdown-rendered table.calendar tr {
+  height: 4.5em;
+}
+
+.markdown-rendered table.calendar td {
+  max-height: 4.5em;
   overflow: hidden;
+  vertical-align: top;
+}
+
+.markdown-rendered .day {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+/* Force dot-container to a single hidden line, no matter what Dataview's
+ * scoped CSS says. We use !important and multiple selector paths because
+ * Dataview's Svelte CSS ships with high specificity and we cannot rely on
+ * cascade order alone. */
+.markdown-rendered table.calendar .dot-container,
+.markdown-rendered .container .dot-container,
+.markdown-rendered div.dot-container,
+.markdown-rendered .day .dot-container {
+  display: block !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 1em !important;
+  max-height: 1em !important;
+  line-height: 1em !important;
+  box-sizing: border-box !important;
+}
+
+.markdown-rendered .dot-container svg.dot {
+  display: inline-block !important;
+  vertical-align: middle !important;
 }
