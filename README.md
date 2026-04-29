@@ -21,6 +21,15 @@
 
 **主眼は自動化**。セッションを終えるたびに会話が vault の `raw/` に保存され、閾値を超えると Claude がバックグラウンドで相互リンクされた Markdown wiki にコンパイルしていく。ユーザーは何もしなくても、会話を重ねるほど知識グラフが育つ。
 
+**Karpathy 原典への拡張 (v0.9+)**: 原典の LLM Wiki パターンには Web 上で 4 つの弱点が指摘されてきた:
+
+- 信頼度・出典の管理が無く、LLM 由来の主張と原典が retrieval で区別不能になる
+- 古い情報が腐っても残り続け、supersession の概念が無い
+- `[[wikilink]]` が 1 bit (繋がりの有無) しか表現せず、依存・矛盾・原因などのセマンティクスが乗らない
+- ingest が非決定的で、同じ raw を 2 回 ingest すると微妙に違う結果になる
+
+exomemory2 v0.9+ はこの 4 点を **純 Markdown + Dataview の枠内**で解消する: entity / concept ページに `confidence` / `sources` / `last_verified` を導出、「X から Y に移行」型のフレーズを ingest が拾って旧ページに `stale: true` を立てる、Connections を typed Dataview inline field 化 (`depends_on::` / `contradicts::` / `caused_by::` / `fixed_in::` / `supersedes::` / `related_to::`)、衝突解決の決定木を WIKI.md に明文化 (supersession → recency → authority → 両論併記)。SQLite / ベクター DB / 専用ランタイムは導入しない (= file-over-app の原則を維持、Obsidian でそのまま human-readable に開ける)。設計詳細は [plans/v0.9-wiki-quality.md](plans/v0.9-wiki-quality.md)。
+
 v0.3 からは会話だけでなく **Claude が `WebFetch` で読んだページも自動的に wiki に流れ込む**（`/wiki-clip` で明示クリップも可、認証付きページは `browser-use` 経由で Chrome のログインセッションを流用）。これで「Claude と一緒に読んだもの」が全部蓄積される。
 
 v0.4 では蓄積された wiki を **Obsidian Dataview で横断クエリ**できるよう、source page に `source_type` / `word_count` / `reading_time_min` / `domain` などの frontmatter を自動付与し、`wiki/dashboards/` に「直近 source」「domain 別 web クリップ」「人気 entity」など 8 種のダッシュボードを同梱する（`/wiki-migrate` で既存 vault も一発で現行スキーマに揃う）。

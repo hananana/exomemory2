@@ -21,6 +21,15 @@ A Claude Code plugin that implements [Andrej Karpathy's LLM Wiki pattern](https:
 
 **The focus is automation.** Every time a session ends, the conversation is saved to the vault's `raw/` directory, and once enough has accumulated, Claude is spawned in the background to compile the raw material into an interlinked markdown wiki. You don't have to do anything — the knowledge graph grows on its own as you keep using Claude.
 
+**Extensions to Karpathy's original (v0.9+)**: The original LLM Wiki pattern has four weaknesses that have been widely discussed online:
+
+- No confidence or sourcing management — LLM-derived claims and original sources become indistinguishable in retrieval
+- Stale information rots in place; there is no concept of supersession
+- `[[wikilink]]` carries only 1 bit (link or no link) — it can't express dependency, contradiction, causation, or other semantics
+- Ingest is non-deterministic — re-ingesting the same raw produces subtly different results
+
+exomemory2 v0.9+ addresses all four **within the pure Markdown + Dataview boundary**: derived `confidence` / `sources` / `last_verified` on every entity/concept page; ingest detects "switched from X to Y" / "X was replaced by Y" / 「X から Y に移行」-style phrases and marks the old page `stale: true`; the Connections section uses typed Dataview inline fields (`depends_on::` / `contradicts::` / `caused_by::` / `fixed_in::` / `supersedes::` / `related_to::`); the conflict resolution decision tree (supersession → recency → authority → dual-statement) is codified in WIKI.md. No SQLite, no vector DB, no dedicated runtime — file-over-app stays intact and the vault opens cleanly in Obsidian as human-readable Markdown. See [plans/v0.9-wiki-quality.md](plans/v0.9-wiki-quality.md) for the design.
+
 Starting with v0.3, **web pages Claude reads via `WebFetch` also flow into the wiki automatically** (explicit clipping via `/wiki-clip` is also supported; authenticated pages go through `browser-use` to reuse your Chrome login session). Everything you and Claude read together gets captured.
 
 As of v0.4, the accumulated wiki is queryable via **Obsidian Dataview**. Source pages are auto-tagged with `source_type` / `word_count` / `reading_time_min` / `domain` frontmatter, and `wiki/dashboards/` ships 8 pre-built views (recent sources, clips by domain, popular entities, orphan concepts, etc.). Existing vaults can be upgraded in place with `/wiki-migrate`.
