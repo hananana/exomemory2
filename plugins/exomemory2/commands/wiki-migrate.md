@@ -307,8 +307,8 @@ if [ "$SKIP_SCHEMA_UPDATE" != "1" ]; then
   template_wiki="$TEMPLATE_DIR/WIKI.md"
   first_line=$(head -n 1 "$vault_wiki" 2>/dev/null || true)
 
-  if [ "$first_line" = "<!-- exomemory2-schema: v0.4 -->" ]; then
-    echo "WIKI.md already at schema v0.4, no update needed"
+  if [ "$first_line" = "<!-- exomemory2-schema: v0.9 -->" ]; then
+    echo "WIKI.md already at schema v0.9, no update needed"
   else
     if [ "$DRY_RUN" = "0" ]; then
       if [ -f "$vault_wiki.bak" ]; then
@@ -316,9 +316,9 @@ if [ "$SKIP_SCHEMA_UPDATE" != "1" ]; then
       fi
       cp "$vault_wiki" "$vault_wiki.bak"
       cp "$template_wiki" "$vault_wiki"
-      echo "WIKI.md upgraded to schema v0.4 (backup: WIKI.md.bak)"
+      echo "WIKI.md upgraded to schema v0.9 (backup: WIKI.md.bak)"
     else
-      echo "[dry-run] would upgrade WIKI.md to schema v0.4"
+      echo "[dry-run] would upgrade WIKI.md to schema v0.9"
     fi
   fi
 fi
@@ -574,6 +574,82 @@ fi
 echo "captured_at backfill: done=$backfill_done already=$backfill_skipped_current no-transcript=$backfill_skipped_no_transcript no-ts=$backfill_skipped_no_timestamp"
 ```
 
+## Step 9.7: v0.9 entity/concept confidence backfill
+
+For every `wiki/entities/*.md` and `wiki/concepts/*.md`, recompute and upsert `sources` / `last_verified` / `confidence` per the v0.9 schema. Idempotent — re-runs produce no diff once the page is already at v0.9.
+
+`scripts/migrate-entity-confidence.py` is stdlib-only Python (no PyYAML). Pages with nested YAML in their frontmatter are skipped with a warning; everything else is processed in place.
+
+```bash
+confidence_changed=0
+confidence_unchanged=0
+confidence_skipped_nested=0
+confidence_parse_error=0
+
+if [ -d "$VAULT/wiki/entities" ] || [ -d "$VAULT/wiki/concepts" ]; then
+  args=("$VAULT")
+  [ "$DRY_RUN" = "1" ] && args+=("--dry-run")
+  out=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/migrate-entity-confidence.py" "${args[@]}" 2>&1) || true
+  while IFS= read -r line; do
+    case "$line" in
+      "CHANGED "*)         confidence_changed=$((confidence_changed + 1)) ;;
+      "UNCHANGED "*)       confidence_unchanged=$((confidence_unchanged + 1)) ;;
+      "SKIPPED-NESTED "*)  confidence_skipped_nested=$((confidence_skipped_nested + 1)) ;;
+      "PARSE-ERROR "*)     confidence_parse_error=$((confidence_parse_error + 1)) ;;
+    esac
+  done <<<"$out"
+  if [ "$DRY_RUN" = "0" ] && [ "$confidence_changed" -gt 0 ]; then
+    today=$(date +%Y-%m-%d)
+    while IFS= read -r line; do
+      case "$line" in
+        "CHANGED "*)
+          slug=$(printf '%s' "$line" | sed -E 's#^CHANGED .*/([^/]+)\.md$#\1#')
+          printf '\n## [%s] MIGRATE-CONFIDENCE | %s\n' "$today" "$slug" >> "$VAULT/wiki/log.md"
+          ;;
+      esac
+    done <<<"$out"
+  fi
+fi
+echo "entity-confidence backfill: changed=$confidence_changed unchanged=$confidence_unchanged skipped-nested=$confidence_skipped_nested parse-error=$confidence_parse_error"
+```
+
+## Step 9.8: v0.9 typed-Connections retrofit
+
+For every `wiki/entities/*.md` and `wiki/concepts/*.md`, prefix any bare `- [[X]] ...` line in `## Connections` with `- related_to:: `. Lines that already use a vocabulary key (`depends_on::` / `contradicts::` / `caused_by::` / `fixed_in::` / `supersedes::` / `related_to::`) and any custom lines (e.g. `- (memo) [[X]]`) are left untouched. Idempotent.
+
+```bash
+typed_changed=0
+typed_unchanged=0
+typed_no_connections=0
+typed_parse_error=0
+
+if [ -d "$VAULT/wiki/entities" ] || [ -d "$VAULT/wiki/concepts" ]; then
+  args=("$VAULT")
+  [ "$DRY_RUN" = "1" ] && args+=("--dry-run")
+  out=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/migrate-typed-connections.py" "${args[@]}" 2>&1) || true
+  while IFS= read -r line; do
+    case "$line" in
+      "CHANGED "*)         typed_changed=$((typed_changed + 1)) ;;
+      "UNCHANGED "*)       typed_unchanged=$((typed_unchanged + 1)) ;;
+      "NO-CONNECTIONS "*)  typed_no_connections=$((typed_no_connections + 1)) ;;
+      "PARSE-ERROR "*)     typed_parse_error=$((typed_parse_error + 1)) ;;
+    esac
+  done <<<"$out"
+  if [ "$DRY_RUN" = "0" ] && [ "$typed_changed" -gt 0 ]; then
+    today=$(date +%Y-%m-%d)
+    while IFS= read -r line; do
+      case "$line" in
+        "CHANGED "*)
+          slug=$(printf '%s' "$line" | sed -E 's#^CHANGED .*/([^/]+)\.md$#\1#')
+          printf '\n## [%s] MIGRATE-CONNECTIONS | %s\n' "$today" "$slug" >> "$VAULT/wiki/log.md"
+          ;;
+      esac
+    done <<<"$out"
+  fi
+fi
+echo "typed-connections retrofit: changed=$typed_changed unchanged=$typed_unchanged no-connections=$typed_no_connections parse-error=$typed_parse_error"
+```
+
 ## Step 10: Log and summarize
 
 Append a single summary line to `<VAULT>/wiki/log.md` (skipped in `--dry-run`):
@@ -582,8 +658,8 @@ Append a single summary line to `<VAULT>/wiki/log.md` (skipped in `--dry-run`):
 if [ "$DRY_RUN" = "0" ]; then
   today=$(date +%Y-%m-%d)
   mkdir -p "$VAULT/wiki"
-  printf '\n## [%s] MIGRATE | processed=%d, changed=%d, orphan=%d, error=%d, index_updated=%d, snippet=%d, backfill=%d\n' \
-    "$today" "$processed" "$changed" "$orphan" "$error" "$index_updated" "$snippet_count" "$backfill_done" >> "$VAULT/wiki/log.md"
+  printf '\n## [%s] MIGRATE | processed=%d, changed=%d, orphan=%d, error=%d, index_updated=%d, snippet=%d, backfill=%d, confidence_changed=%d, typed_changed=%d\n' \
+    "$today" "$processed" "$changed" "$orphan" "$error" "$index_updated" "$snippet_count" "$backfill_done" "$confidence_changed" "$typed_changed" >> "$VAULT/wiki/log.md"
 fi
 
 cat <<EOF
@@ -595,6 +671,8 @@ Migration complete.
   Index:     updated=$index_updated
   Calendar snippet: $snippet_msg
   Captured_at backfill: $backfill_done handovers (skipped: $backfill_skipped_current already-current, $backfill_skipped_no_transcript no-transcript, $backfill_skipped_no_timestamp no-timestamp)
+  v0.9 entity confidence: changed=$confidence_changed, unchanged=$confidence_unchanged, skipped-nested=$confidence_skipped_nested, parse-error=$confidence_parse_error
+  v0.9 typed Connections: changed=$typed_changed, unchanged=$typed_unchanged, no-connections=$typed_no_connections, parse-error=$typed_parse_error
 EOF
 ```
 

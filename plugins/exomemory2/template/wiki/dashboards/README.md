@@ -25,16 +25,26 @@ Cross-cutting views over the wiki, powered by the [Obsidian Dataview](https://gi
 | [[popular-entities]] | Entities ranked by how many pages link to them |
 | [[orphan-concepts]] | Concepts with one or zero inbound links (candidates for pruning or enrichment) |
 | [[long-reads]] | Sources with estimated reading time ≥ 10 minutes |
+| [[low-confidence]] (v0.9+) | Entities/concepts with `confidence < 0.5` — review worklist |
+| [[stale]] (v0.9+) | Entities/concepts marked `stale: true` via supersession |
+| [[contradictions]] (v0.9+) | Pages with `- contradicts::` typed Connections |
+| [[dependencies]] (v0.9+) | Dependency graph from `- depends_on::` typed Connections |
 
 ## Customizing
 
-Each dashboard file is just a DQL snippet — edit freely. The v0.4 frontmatter fields available on source pages are:
+Each dashboard file is just a DQL snippet — edit freely. The frontmatter fields available are:
 
+**Source pages (v0.4+)**:
 - Common: `source_type`, `word_count`, `reading_time_min`, `last_updated`, `tags`
 - Handover: `session_id`
 - Web clip: `source_url`, `domain`, `captured_at`, `captured_by`
 
-Entity and concept pages have no extra frontmatter; use Dataview natives `file.inlinks`, `file.ctime`, `file.mtime` instead.
+**Entity / concept pages (v0.9+)**:
+- `confidence`, `sources`, `last_verified` (derived; recomputed on each `/wiki-ingest` MERGE and `/wiki-migrate`)
+- Optional: `stale`, `superseded_by`, `superseded_at`, `supersedes`
+- Dataview natives also available: `file.inlinks`, `file.ctime`, `file.mtime`
+
+**Connection lines (v0.9+)**: each Connection bullet is a Dataview inline field with one of `depends_on::` / `contradicts::` / `caused_by::` / `fixed_in::` / `supersedes::` / `related_to::`. Query them via `file.lists` (each list item exposes `.text` containing the typed key).
 
 ## Other views on `index.md`
 

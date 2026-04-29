@@ -118,10 +118,20 @@ Skip this step entirely when no dirty files. Otherwise, read `WIKI.md` once for 
 2. Extract: title, summary (2-4 paragraphs), key claims, mentioned entities, mentioned concepts, contradictions vs existing wiki content.
 3. **Use the derived frontmatter the preflight record already carries** (`source_type`, `word_count`, `reading_time_min`, plus `session_id` for handover or `source_url`/`captured_at`/`captured_by`/`domain` for web-clip). Do not recompute these.
 4. Write `<VAULT>/wiki/sources/<slug>.md` (Source Page Format from WIKI.md). On **UPDATE** (record's `existing_page` set): merge frontmatter — overwrite only the derived fields above plus `title`, `tags`, `source_hash`, `last_updated`. **Preserve any other frontmatter keys the user added by hand.**
-5. For each mentioned entity / concept: CREATE if missing, MERGE (append Connection + new About paragraph) if existing.
-6. Update `<VAULT>/wiki/index.md`: append `- [[<slug>]] — <title>` under `## Sources` / `## Entities` / `## Concepts`. Do not duplicate. Never overwrite the file — preserve content above those sections (e.g. `## Activity heatmap`, `## Handover calendar`).
-7. Update `<VAULT>/wiki/overview.md`: append / light revise. **Do not rewrite from scratch.**
-8. Append to `<VAULT>/wiki/log.md`: `## [YYYY-MM-DD] CREATE | <slug>` (or `UPDATE` / `MERGE`).
+5. For each mentioned entity / concept: CREATE if missing, MERGE (append typed Connection + new About paragraph) if existing. Apply the **MERGE Rule decision tree** in WIKI.md when the new claim conflicts with existing About text. Connection bullets must use a typed key (`depends_on::` / `contradicts::` / `caused_by::` / `fixed_in::` / `supersedes::` / `related_to::`). When unsure, use `related_to::`.
+6. **For each entity/concept page touched in step 5 (CREATE or MERGE), recompute `sources` and `confidence` (v0.9+)**:
+   - `sources` = count of `wiki/sources/*.md` files containing `[[<entity-slug>]]`, `[[<entity-slug>|...]]`, or `[[<entity-slug>#...]]` (use `grep -l -E "\[\[<slug>(\\\||#|\\])"`)
+   - `confidence` = `clamp(sources/5.0, 0.3, 1.0)` (= 0.3, 0.4, 0.6, 0.8, 1.0 for sources 1..5+); cap at 0.5 if the page's `## Connections` section contains at least one `- contradicts::` line
+   - Set `last_verified` to today's date (`date +%Y-%m-%d`)
+   - Write all three fields back into the page's frontmatter (preserve all other keys)
+7. **Supersession check (v0.9+)**: scan the source body for the trigger phrases in WIKI.md "Supersession (v0.9+)". For each match where both X and Y resolve to wiki entity/concept slugs:
+   - Old page X: set `stale: true`, `superseded_by: [[<Y-slug>]]`, `superseded_at: <today>`
+   - New page Y: set `supersedes: [[<X-slug>]]`, add `- supersedes:: [[<X-slug>]]` to Y's Connections if not already present
+   - Append `## [<today>] SUPERSEDE | <X-slug> -> <Y-slug>` to log.md
+   - **Never delete the old page's body**
+8. Update `<VAULT>/wiki/index.md`: append `- [[<slug>]] — <title>` under `## Sources` / `## Entities` / `## Concepts`. Do not duplicate. Never overwrite the file — preserve content above those sections (e.g. `## Activity heatmap`, `## Handover calendar`).
+9. Update `<VAULT>/wiki/overview.md`: append / light revise. **Do not rewrite from scratch.**
+10. Append to `<VAULT>/wiki/log.md`: `## [YYYY-MM-DD] CREATE | <slug>` (or `UPDATE` / `MERGE` / `SUPERSEDE`).
 
 **SKIP and SKIP-empty are already in `log.md`** — preflight wrote them in batch before Step 1 returned. Do not re-emit them.
 
@@ -146,6 +156,9 @@ Wiki: <VAULT>/wiki/
 
 ## Notes
 
-- Write order per dirty file: entities/concepts MERGE → index → overview → sources → log. If the source write fails, the wiki is still consistent.
+- Write order per dirty file: entities/concepts MERGE → confidence/sources recompute → supersession check → index → overview → sources → log. If the source write fails, the wiki is still consistent.
 - Be conservative with entity / concept MERGE: when unsure two names refer to the same thing, prefer separate pages.
+- **Supersession is narrow on purpose** — only the explicit linguistic triggers in WIKI.md fire it. Do not invent your own (e.g. "X is better than Y" is **not** a trigger). False supersession damages future retrieval.
+- **Connection types** — when a Connection clearly fits `depends_on` / `contradicts` / `caused_by` / `fixed_in` / `supersedes`, use that key. When unclear, use `related_to::` (the default catch-all). Never emit a bare `- [[X]]` line in v0.9+ ingests.
+- **`confidence` is a derived field** — never invent or hand-write a value. Always compute it from `sources` and the `contradicts::` presence per the formula in WIKI.md.
 - WIKI.md is the schema authority. If anything below disagrees, WIKI.md wins.

@@ -1,4 +1,4 @@
-<!-- exomemory2-schema: v0.4 -->
+<!-- exomemory2-schema: v0.9 -->
 # WIKI.md — Schema and Workflow
 
 This file defines the schema and workflow for this vault. Claude reads this file during every `/wiki-ingest` and `/wiki-query` operation.
@@ -136,6 +136,14 @@ title: <canonical name>
 type: entity
 tags: [person | organization | project | product, ...]
 last_updated: YYYY-MM-DD
+sources: <int>                # v0.9+, count of wiki/sources/ pages linking to this page
+last_verified: YYYY-MM-DD     # v0.9+, last CREATE/MERGE date (separate from last_updated)
+confidence: <float 0.0-1.0>   # v0.9+, derived (see "Confidence scoring" below)
+# Optional v0.9+ fields, only present when set:
+# stale: true
+# superseded_by: [[<slug>]]
+# superseded_at: YYYY-MM-DD
+# supersedes: [[<slug>]]
 ---
 ```
 
@@ -147,8 +155,14 @@ title: <canonical name>
 type: concept
 tags: [framework | method | theory | ...]
 last_updated: YYYY-MM-DD
+sources: <int>                # v0.9+
+last_verified: YYYY-MM-DD     # v0.9+
+confidence: <float 0.0-1.0>   # v0.9+
+# Optional v0.9+: stale, superseded_by, superseded_at, supersedes
 ---
 ```
+
+The `sources` / `last_verified` / `confidence` triple is **derived** — Claude computes it during ingest/MERGE and `/wiki-migrate` recomputes it for older pages. Users do not write these by hand. See "Confidence scoring (v0.9+)" and "Supersession (v0.9+)" sections below for the exact rules.
 
 ## Source Page Format
 
@@ -190,9 +204,27 @@ last_updated: YYYY-MM-DD
 
 ## Connections
 
-- [[source-or-other-page]] — how this is related
+- depends_on:: [[<slug>]] — note
+- contradicts:: [[<slug>]] — note
+- caused_by:: [[<slug>]] — note
+- fixed_in:: [[<slug>]] — note
+- supersedes:: [[<slug>]] — note
+- related_to:: [[<slug>]] — note
 - ...
 ```
+
+**Typed connections (v0.9+)**: Each Connection bullet is a **Dataview inline field** with one of the keys below. The value `[[<slug>]] — note` is preserved as a string by Dataview, while the wikilink remains parseable for the graph view.
+
+| key | meaning |
+|-----|---------|
+| `depends_on` | The current page depends on the linked page (lib, upstream code, prerequisite knowledge) |
+| `contradicts` | The two pages express incompatible claims or designs |
+| `caused_by` | The current page exists because of the linked page (cause, root incident) |
+| `fixed_in` | The current page was fixed/resolved in the linked page (version, commit, ticket) |
+| `supersedes` | The current page replaces the linked page (paired with `superseded_by` on the linked page) |
+| `related_to` | Default catch-all for weak associations |
+
+**Backwards compatibility**: A bare `- [[<slug>]] — note` line (no key) is treated as `related_to::` for retrieval. New ingests should always emit a typed key. `/wiki-migrate` retrofits bare lines by prepending `related_to:: `.
 
 ## Ingest Workflow
 
@@ -239,16 +271,19 @@ For `CREATE` or `UPDATE`:
    - On **UPDATE**: merge frontmatter — overwrite the fields listed above plus `title`, `tags`, `source_hash`, `last_updated`; preserve any other keys (user-authored metadata)
 4. For **each mentioned entity**:
    - Compute entity slug
-   - If `wiki/entities/<slug>.md` not exists → `CREATE` (write a fresh "About" based on what the source says, plus Connection back to this source)
-   - If exists → `MERGE`: read existing page, append new Connection entry (back to this source), and if the source contributes new "About" info, add it without deleting existing info
+   - If `wiki/entities/<slug>.md` not exists → `CREATE` (write a fresh "About" based on what the source says, plus a typed Connection back to this source — usually `- related_to:: [[<this-source-slug>]]`, or a more specific key if obvious)
+   - If exists → `MERGE`: read existing page, append a typed Connection entry, follow the conflict resolution decision tree (see "MERGE Rule for Entities and Concepts" below) for any contradicting About content
+   - After CREATE / MERGE: recompute `sources` (count of `wiki/sources/*.md` files containing `[[<entity-slug>]]`, `[[<entity-slug>|...]]`, or `[[<entity-slug>#...]]`) and recompute `confidence` per the formula in "Confidence scoring (v0.9+)"
+   - Set `last_verified` to today's date
 5. For **each mentioned concept**: same logic, but in `wiki/concepts/`
-6. Update `wiki/index.md`:
+6. **Supersession check (v0.9+)**: scan the source body for the trigger phrases listed in "Supersession (v0.9+)". If a trigger fires AND both X and Y resolve to wiki entity-or-concept slugs (either pre-existing or just created in this ingest), apply the supersession marking on both pages and append a `## [YYYY-MM-DD] SUPERSEDE | <X-slug> -> <Y-slug>` line to log.md
+7. Update `wiki/index.md`:
    - Under appropriate section (Sources / Entities / Concepts), append new pages as `- [[<slug>]] — <title>` (if not already listed)
-7. Update `wiki/overview.md`:
+8. Update `wiki/overview.md`:
    - Read existing content
    - Append or revise relevant parts to reflect new knowledge (do NOT rewrite the whole file — preserve existing synthesis)
-8. Append to `wiki/log.md`:
-   - `## [YYYY-MM-DD] CREATE | <slug>` (or `UPDATE`, `MERGE`, `SKIP`)
+9. Append to `wiki/log.md`:
+   - `## [YYYY-MM-DD] CREATE | <slug>` (or `UPDATE`, `MERGE`, `SKIP`, `SUPERSEDE`)
    - One line per affected page
 
 For `SKIP`: just append `## [YYYY-MM-DD] SKIP | <slug>` to log.md and stop.
@@ -261,26 +296,70 @@ When Claude processes a `/wiki-query` call:
 
 1. Read `wiki/index.md` to understand what's available
 2. Identify pages relevant to the question (by title match, keyword overlap, or concept relatedness)
-3. Read those pages fully
-4. Synthesize an answer:
+3. **Apply the stale filter (v0.9+)** — see "Stale filter (v0.9+)" below. Pages with `stale: true` are excluded from the candidate list unless one of rules R-2/R-3/R-4 applies
+4. Read the surviving candidates fully
+5. Synthesize an answer:
    - Use `[[wikilink]]` citations for every significant claim, pointing to the page that supports it
    - If contradictions exist between pages, surface them explicitly
    - If the wiki doesn't cover the question, say so plainly — do not fabricate
-5. If `--save` was specified, write the answer to `wiki/syntheses/<slug>.md` with frontmatter `type: synthesis`, and append `## [YYYY-MM-DD] CREATE | syntheses/<slug>` to log.md
+6. If `--save` was specified, write the answer to `wiki/syntheses/<slug>.md` with frontmatter `type: synthesis`, and append `## [YYYY-MM-DD] CREATE | syntheses/<slug>` to log.md
+
+### Stale filter (v0.9+)
+
+A page is included in the candidate set if **any** of the following rules matches. Rules are checked deterministically (no LLM judgement) by `commands/wiki-query.md`'s Bash preprocess.
+
+| Rule | Condition | Action |
+|------|-----------|--------|
+| **R-1** (default include) | `stale != true` (frontmatter has no `stale: true` line) | Always include |
+| **R-2** (history keyword) | The user's question contains any of: `history`, `経緯`, `以前`, `昔`, `deprecated`, `古い`, `previous`, `old`, `廃止`, `なぜ.*やめ` (case-insensitive substring; regex for the last) | Include all candidates regardless of `stale` |
+| **R-3** (direct page reference) | The question contains a literal `[[<slug>]]` for the page, OR contains the page's `title` as an exact substring | Include that specific page even if `stale: true` |
+| **R-4** (supersession traversal) | A non-stale page already in the candidate set has `supersedes: [[X]]` in its frontmatter | Add `X` (one hop) to the candidate set even if `stale: true` |
+
+R-4 is critical: it ensures that questions like "What was Y's predecessor?" or "Why did we move off X?" can reach the stale predecessor through the new page's `supersedes` link.
 
 ## MERGE Rule for Entities and Concepts
 
 Never overwrite entity or concept pages — always MERGE. Rationale: these pages accumulate information across many sources, and overwriting risks information loss.
 
-**Merge procedure:**
+**Base merge procedure:**
 
 1. Read existing page
 2. Keep all existing sections intact
-3. Add new information:
-   - New Connection lines at the bottom of Connections section
-   - New "About" info appended as additional paragraph (or in a dated note if it contradicts existing info)
-4. Update `last_updated` in frontmatter
-5. Append `## [YYYY-MM-DD] MERGE | <slug>` to log.md
+3. Add new information (see decision tree below for conflict handling):
+   - New Connection lines (with typed key) at the bottom of Connections section
+   - New "About" info appended as additional paragraph
+4. Recompute `sources` (count of `wiki/sources/*.md` pages with a wikilink to this page's slug)
+5. Recompute `confidence` (see "Confidence scoring (v0.9+)" section)
+6. Update `last_updated` and `last_verified` in frontmatter (today's date)
+7. Append `## [YYYY-MM-DD] MERGE | <slug>` to log.md
+
+### Conflict resolution decision tree (v0.9+)
+
+When a new claim from a source contradicts what's already on the entity/concept page, choose **the first matching rule**:
+
+1. **Supersession trigger** — The new source contains explicit linguistic markers (see "Supersession (v0.9+)" section). →
+   - Mark old page: `stale: true`, `superseded_by: [[<new-slug>]]`, `superseded_at: <today>`
+   - Mark new page: `supersedes: [[<old-slug>]]`
+   - **Both pages keep their existing body**. The old page is hidden from default queries but never deleted.
+
+2. **Recency winner** — The new claim is dated within the last 30 days AND the existing claim is older than 90 days AND both refer to the same "current state" fact (which lib is currently used, current design, etc.). →
+   - Insert new claim at the start of the "About" section
+   - Prefix the old text with `(過去の記述: ... as of YYYY-MM-DD)` / `(prior: ... as of YYYY-MM-DD)`
+   - Both texts remain on the page
+
+3. **Authority winner** — The new source has any of:
+   - `tags` containing `paper`, `official`, or `spec`
+   - `source_type == manual` AND `domain` is empty (= user-placed raw, treated as authoritative)
+
+   If both old and new are authoritative, fall through to rule 2 (recency). Otherwise the authoritative side wins:
+   - Authoritative claim goes into the "About" lead paragraph
+   - The non-authoritative claim becomes a footnote-style trailing paragraph
+
+4. **Default — dual statement**: Add a `## Notes (YYYY-MM-DD)` section enumerating both views. Add a `- contradicts:: [[<other-slug>]]` line in Connections if a corresponding wiki page exists. Confidence is **automatically capped at 0.5** for any page whose Connections contain at least one `contradicts::` line (see formula).
+
+Apply the tree per individual fact. A single MERGE may trigger different rules for different claims in the same source.
+
+> **Note on the `## Contradictions` section**: Source pages may carry a top-level `## Contradictions` section (see "Source Page Format" above). That section is for **source pages only** and lists raw vs wiki disagreements. Entity / concept pages do **not** use a `## Contradictions` section — their contradictions live as `- contradicts:: [[X]]` lines inside `## Connections`. The two are distinct and confidence is computed only from the latter.
 
 ## Log.md Format
 
@@ -290,9 +369,9 @@ Append-only. One line per operation:
 ## [YYYY-MM-DD] <op> | <slug>
 ```
 
-Where `<op>` ∈ `{CREATE, UPDATE, MERGE, SKIP, SKIP-empty, MIGRATE-DATAVIEW, MIGRATE-ORPHAN, MIGRATE-ERROR}`. For slug collisions that triggered an error, do not log (the error is reported to the user only).
+Where `<op>` ∈ `{CREATE, UPDATE, MERGE, SKIP, SKIP-empty, SUPERSEDE, MIGRATE-DATAVIEW, MIGRATE-CONFIDENCE, MIGRATE-CONNECTIONS, MIGRATE-ORPHAN, MIGRATE-ERROR}`. For slug collisions that triggered an error, do not log (the error is reported to the user only).
 
-`/wiki-migrate` writes a single summary line of the form `## [YYYY-MM-DD] MIGRATE | processed=<N>, changed=<C>, orphan=<O>, error=<E>`. Individual skipped pages are logged as `MIGRATE-ORPHAN` (raw file missing) or `MIGRATE-ERROR` (unparseable frontmatter). (Vaults migrated under v0.4 may have historical `MIGRATE-DATAVIEW` entries — those are left intact.)
+`/wiki-migrate` writes a single summary line of the form `## [YYYY-MM-DD] MIGRATE | processed=<N>, changed=<C>, orphan=<O>, error=<E>` plus per-page `MIGRATE-CONFIDENCE` / `MIGRATE-CONNECTIONS` lines for v0.9+ retrofits. `SUPERSEDE` lines (form: `## [YYYY-MM-DD] SUPERSEDE | <old-slug> -> <new-slug>`) are written by `/wiki-ingest` when a supersession trigger fires. Individual skipped pages are logged as `MIGRATE-ORPHAN` (raw file missing) or `MIGRATE-ERROR` (unparseable frontmatter). (Vaults migrated under v0.4 may have historical `MIGRATE-DATAVIEW` entries — those are left intact.)
 
 ## Notes on handovers
 
@@ -334,22 +413,79 @@ Files under `raw/web/` are web pages clipped via `/wiki-clip` or auto-captured o
 
 This vault is designed to play well with the [Obsidian Dataview](https://github.com/blacksmithgu/obsidian-dataview) plugin. Source-page frontmatter carries DataView-queryable derived fields (`source_type`, `word_count`, `reading_time_min`, and `domain` for web clips), and `wiki/dashboards/` ships pre-built DQL views.
 
-**Why entity / concept pages have no extra fields:**
+**Source pages** carry Dataview-queryable derived fields (`source_type`, `word_count`, `reading_time_min`, `domain`).
 
-Dataview exposes native fields that make explicit counters unnecessary:
+**Entity / concept pages (v0.9+)** carry `sources`, `last_verified`, `confidence`, and the optional `stale` / `supersedes` / `superseded_by` / `superseded_at`. Dataview native fields are still useful in parallel:
 
-- `length(file.inlinks)` — how many pages link here (replaces `connection_count`)
-- `file.ctime` — first created (replaces `first_seen`)
-- `file.mtime` — last modified (replaces `last_connected`)
+- `length(file.inlinks)` — real-time inbound link count (note: counts links from anywhere, not just `wiki/sources/`)
+- `file.ctime` — first created
+- `file.mtime` — last modified
 
-Dashboards under `wiki/dashboards/` use these native fields directly; no frontmatter retrofit is needed for `wiki/entities/` or `wiki/concepts/`.
+The frontmatter `sources` is the **ingest-time snapshot** counted across `wiki/sources/*.md` only (used for confidence). Both signals coexist; pick the one that fits the dashboard.
 
-**Bringing an existing vault to v0.4:**
+**Bringing an existing vault to v0.9:**
 
 Run `/wiki-migrate` once. It will:
 
 1. Retrofit derived fields on all `wiki/sources/*.md` pages (idempotent — re-runs produce no diff)
-2. Replace the vault's `WIKI.md` with the v0.4 template if the line-1 schema marker is absent or points at an older version (with `.bak` preserved)
-3. Copy `wiki/dashboards/` if missing (never overwrites existing dashboard files)
+2. Backfill `sources` / `last_verified` / `confidence` on every `wiki/entities/*.md` and `wiki/concepts/*.md` (v0.9+, idempotent)
+3. Prefix bare `- [[X]]` lines in entity/concept Connections sections with `- related_to:: ` (v0.9+, idempotent)
+4. Replace the vault's `WIKI.md` with the current template when the line-1 schema marker is older than `v0.9`
+5. Copy `wiki/dashboards/` files that are missing (never overwrites existing ones)
 
-After the migration, new `/wiki-ingest` operations produce pages already conformant with the v0.4 schema, so the migration command does not need to be re-run in normal operation.
+After the migration, new `/wiki-ingest` operations produce pages already conformant with the v0.9 schema.
+
+## Confidence scoring (v0.9+)
+
+Every entity and concept page has a `confidence` value derived from objective signals on the page itself. **Users do not write `confidence` by hand** — it is recomputed on every CREATE/MERGE and on every `/wiki-migrate`.
+
+**Formula** (deterministic, identical in ingest and migrate paths):
+
+```
+base = clamp(sources / 5.0, 0.3, 1.0)
+# 1 source → 0.3, 2 → 0.4, 3 → 0.6, 4 → 0.8, 5+ → 1.0
+
+if contradictions_present:
+    confidence = min(base, 0.5)
+else:
+    confidence = base
+```
+
+**`sources` definition**: count of `wiki/sources/*.md` files that contain a `[[<this-page-slug>]]` wikilink (matched as `[[slug]]`, `[[slug|alias]]`, or `[[slug#anchor]]`). The grep is run during ingest/MERGE and during migrate; both paths must produce the same number. **`length(file.inlinks)` is not used** for confidence (it counts inbound links from anywhere, including index/dashboards/syntheses, which would skew the score).
+
+**`contradictions_present` definition**: at least one bullet inside the page's `## Connections` section starts with `- contradicts::`. Connections section absent or empty → false.
+
+**stale pages still get confidence computed** — the `stale: true` flag does **not** force confidence down. Stale pages remain queryable for history-style questions and keep an honest score of how well-sourced their (outdated) claims were.
+
+## Supersession (v0.9+)
+
+Supersession marks an entity/concept page as outdated and points to the newer page that replaced it. It is triggered **only** by explicit linguistic markers in the new source — never by mere recency, by general improvements, or by Claude's own judgement that "X looks better than Y".
+
+**Trigger phrases** (case-insensitive substring match in the new source's body):
+
+| Language | Phrase pattern |
+|----------|----------------|
+| English | "switched from X to Y" |
+| English | "moved from X to Y" |
+| English | "X was replaced by Y" / "replaced X with Y" |
+| English | "deprecated X in favor of Y" |
+| English | "X is no longer used, we use Y now" / "no longer use X" |
+| Japanese | 「X から Y に移行」「X を Y に移行」 |
+| Japanese | 「X をやめて Y にした」「X はやめて Y を使う」 |
+| Japanese | 「X を Y で置き換え」「X を Y に置き換え」 |
+| Japanese | 「X は廃止」「X を廃止して Y」 |
+
+When a trigger is detected during ingest of a source that mentions both X and Y as known/new entity-or-concept slugs:
+
+1. **Newer page Y (superseder)**:
+   - Add `supersedes: [[X]]` to frontmatter
+   - Add `- supersedes:: [[X]] — <one-line context>` to Connections
+2. **Older page X (superseded)**:
+   - Set `stale: true` in frontmatter
+   - Add `superseded_by: [[Y]]`
+   - Add `superseded_at: <today>`
+   - **Do not delete or rewrite the body** — it remains as a record of the older state
+
+Add the supersession to log.md as `## [YYYY-MM-DD] SUPERSEDE | <X-slug> -> <Y-slug>`.
+
+**Adding new trigger phrases**: update this list and the corresponding pattern in `commands/wiki-ingest.md`. Trigger detection is intentionally narrow — false positives create false stale flags, which damage future retrieval.
