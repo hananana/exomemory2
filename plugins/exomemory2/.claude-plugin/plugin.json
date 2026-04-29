@@ -1,7 +1,7 @@
 {
   "name": "exomemory2",
   "description": "Karpathy-pattern external memory wiki for Claude Code. Ingest raw sources into a structured, interlinked markdown wiki.",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "author": {
     "name": "hananana"
   },

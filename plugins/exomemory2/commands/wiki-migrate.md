@@ -650,6 +650,41 @@ fi
 echo "typed-connections retrofit: changed=$typed_changed unchanged=$typed_unchanged no-connections=$typed_no_connections parse-error=$typed_parse_error"
 ```
 
+## Step 9.9: v0.9.1 index.md section reorder
+
+Reorder the three content sections in `wiki/index.md` to **Concepts → Entities → Sources** (so the conceptual layer reads first, raw sources last). Idempotent — runs only when the current order differs from the desired one. Skips when any of the three sections is missing or when a foreign H2 sits between them (treated as a customized index, never reordered without manual intent).
+
+```bash
+order_changed=0
+order_unchanged=0
+order_missing=0
+order_no_index=0
+
+args=("$VAULT")
+[ "$DRY_RUN" = "1" ] && args+=("--dry-run")
+out=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/migrate-index-order.py" "${args[@]}" 2>&1) || true
+while IFS= read -r line; do
+  case "$line" in
+    "CHANGED "*)           order_changed=1 ;;
+    "UNCHANGED "*)         order_unchanged=1 ;;
+    "MISSING-SECTIONS "*)  order_missing=1 ;;
+    "NO-INDEX "*)          order_no_index=1 ;;
+  esac
+done <<<"$out"
+
+if [ "$DRY_RUN" = "0" ] && [ "$order_changed" = "1" ]; then
+  printf '\n## [%s] MIGRATE-INDEX-ORDER | reordered\n' "$(date +%Y-%m-%d)" >> "$VAULT/wiki/log.md"
+fi
+
+case "1" in
+  $order_changed)      echo "index-order: reordered to Concepts → Entities → Sources" ;;
+  $order_unchanged)    echo "index-order: already correct" ;;
+  $order_missing)      echo "index-order: skipped (missing section or foreign H2 between trio)" ;;
+  $order_no_index)     echo "index-order: skipped (no index.md)" ;;
+  *)                   echo "index-order: unknown state" ;;
+esac
+```
+
 ## Step 10: Log and summarize
 
 Append a single summary line to `<VAULT>/wiki/log.md` (skipped in `--dry-run`):
@@ -658,8 +693,8 @@ Append a single summary line to `<VAULT>/wiki/log.md` (skipped in `--dry-run`):
 if [ "$DRY_RUN" = "0" ]; then
   today=$(date +%Y-%m-%d)
   mkdir -p "$VAULT/wiki"
-  printf '\n## [%s] MIGRATE | processed=%d, changed=%d, orphan=%d, error=%d, index_updated=%d, snippet=%d, backfill=%d, confidence_changed=%d, typed_changed=%d\n' \
-    "$today" "$processed" "$changed" "$orphan" "$error" "$index_updated" "$snippet_count" "$backfill_done" "$confidence_changed" "$typed_changed" >> "$VAULT/wiki/log.md"
+  printf '\n## [%s] MIGRATE | processed=%d, changed=%d, orphan=%d, error=%d, index_updated=%d, snippet=%d, backfill=%d, confidence_changed=%d, typed_changed=%d, order_changed=%d\n' \
+    "$today" "$processed" "$changed" "$orphan" "$error" "$index_updated" "$snippet_count" "$backfill_done" "$confidence_changed" "$typed_changed" "$order_changed" >> "$VAULT/wiki/log.md"
 fi
 
 cat <<EOF
@@ -673,6 +708,7 @@ Migration complete.
   Captured_at backfill: $backfill_done handovers (skipped: $backfill_skipped_current already-current, $backfill_skipped_no_transcript no-transcript, $backfill_skipped_no_timestamp no-timestamp)
   v0.9 entity confidence: changed=$confidence_changed, unchanged=$confidence_unchanged, skipped-nested=$confidence_skipped_nested, parse-error=$confidence_parse_error
   v0.9 typed Connections: changed=$typed_changed, unchanged=$typed_unchanged, no-connections=$typed_no_connections, parse-error=$typed_parse_error
+  v0.9.1 index order: changed=$order_changed
 EOF
 ```
 

@@ -34,14 +34,14 @@ CALENDAR last_captured_at
 FROM "raw/handovers"
 ```
 
-## Sources
+## Concepts
 
-<!-- source pages will be listed here: `- [[<slug>]] — <title>` -->
+<!-- concept pages will be listed here -->
 
 ## Entities
 
 <!-- entity pages will be listed here -->
 
-## Concepts
+## Sources
 
-<!-- concept pages will be listed here -->
+<!-- source pages will be listed here: `- [[<slug>]] — <title>` -->

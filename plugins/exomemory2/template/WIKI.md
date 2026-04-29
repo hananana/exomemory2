@@ -369,7 +369,7 @@ Append-only. One line per operation:
 ## [YYYY-MM-DD] <op> | <slug>
 ```
 
-Where `<op>` ∈ `{CREATE, UPDATE, MERGE, SKIP, SKIP-empty, SUPERSEDE, MIGRATE-DATAVIEW, MIGRATE-CONFIDENCE, MIGRATE-CONNECTIONS, MIGRATE-ORPHAN, MIGRATE-ERROR}`. For slug collisions that triggered an error, do not log (the error is reported to the user only).
+Where `<op>` ∈ `{CREATE, UPDATE, MERGE, SKIP, SKIP-empty, SUPERSEDE, MIGRATE-DATAVIEW, MIGRATE-CONFIDENCE, MIGRATE-CONNECTIONS, MIGRATE-INDEX-ORDER, MIGRATE-ORPHAN, MIGRATE-ERROR}`. For slug collisions that triggered an error, do not log (the error is reported to the user only).
 
 `/wiki-migrate` writes a single summary line of the form `## [YYYY-MM-DD] MIGRATE | processed=<N>, changed=<C>, orphan=<O>, error=<E>` plus per-page `MIGRATE-CONFIDENCE` / `MIGRATE-CONNECTIONS` lines for v0.9+ retrofits. `SUPERSEDE` lines (form: `## [YYYY-MM-DD] SUPERSEDE | <old-slug> -> <new-slug>`) are written by `/wiki-ingest` when a supersession trigger fires. Individual skipped pages are logged as `MIGRATE-ORPHAN` (raw file missing) or `MIGRATE-ERROR` (unparseable frontmatter). (Vaults migrated under v0.4 may have historical `MIGRATE-DATAVIEW` entries — those are left intact.)
 
